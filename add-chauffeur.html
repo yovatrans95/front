@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yovatrans — Ajouter un chauffeur</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#f0f4ff;--white:#ffffff;
+    --border:rgba(99,130,255,0.15);--border2:rgba(99,130,255,0.28);
+    --blue-50:#eff3ff;--blue-100:#dce5ff;--blue-400:#7b9ef8;
+    --blue-500:#4f72f5;--blue-600:#3a5ce4;--blue-700:#2a47cc;
+    --navy:#1a2c6e;--text2:#4a5580;--muted:#8a95b8;
+    --grad-main:linear-gradient(135deg,#4f72f5 0%,#7c4fe0 100%);
+    --grad-soft:linear-gradient(135deg,#eff3ff 0%,#e8e4ff 100%);
+    --grad-hero:linear-gradient(160deg,#1e3a8a 0%,#3a5ce4 45%,#7c4fe0 100%);
+    --shadow-sm:0 1px 4px rgba(79,114,245,0.09);
+    --shadow:0 4px 18px rgba(79,114,245,0.13);
+    --shadow-lg:0 14px 44px rgba(79,114,245,0.2);
+    --green:#10b981;--red:#ef4444;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--navy);min-height:100vh;
+    background-image:radial-gradient(ellipse 70% 50% at 15% -5%,rgba(79,114,245,0.09) 0%,transparent 60%),
+                     radial-gradient(ellipse 55% 40% at 85% 105%,rgba(124,79,224,0.07) 0%,transparent 60%);}
+
+  /* ── SIDEBAR ── */
+  .sidebar{position:fixed;left:0;top:0;bottom:0;width:240px;background:var(--grad-hero);display:flex;flex-direction:column;z-index:100;box-shadow:4px 0 30px rgba(30,58,138,0.3)}
+  .sb-top{padding:30px 26px 22px;border-bottom:1px solid rgba(255,255,255,0.1)}
+  .logo{display:flex;align-items:center;gap:11px}
+  .logo-icon{width:38px;height:38px;border-radius:11px;background:rgba(255,255,255,0.18);display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0}
+  .logo-name{font-weight:800;font-size:1.2rem;color:#fff;letter-spacing:-0.02em}
+  .logo-sub{font-size:0.65rem;color:rgba(255,255,255,0.45);font-weight:400;letter-spacing:0.05em;margin-top:1px}
+  .nav{padding:18px 14px;flex:1}
+  .nav-section{font-size:0.6rem;text-transform:uppercase;letter-spacing:0.14em;color:rgba(255,255,255,0.35);padding:0 12px;margin:14px 0 5px}
+  .nav-section:first-child{margin-top:0}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;font-size:0.875rem;font-weight:500;color:rgba(255,255,255,0.6);text-decoration:none;transition:all 0.18s;margin-bottom:2px}
+  .nav-item:hover{color:#fff;background:rgba(255,255,255,0.1)}
+  .nav-item.active{color:#fff;background:rgba(255,255,255,0.18);box-shadow:inset 0 0 0 1px rgba(255,255,255,0.18)}
+  .nav-item svg{width:17px;height:17px;flex-shrink:0}
+  .sb-footer{padding:14px 26px;border-top:1px solid rgba(255,255,255,0.1);font-size:0.7rem;color:rgba(255,255,255,0.3)}
+
+  /* ── MAIN ── */
+  .main{margin-left:240px;padding:36px 40px;max-width:calc(100vw - 240px)}
+
+  /* ── BREADCRUMB ── */
+  .breadcrumb{display:flex;align-items:center;gap:8px;font-size:0.8rem;color:var(--muted);margin-bottom:22px}
+  .breadcrumb a{color:var(--blue-500);text-decoration:none;font-weight:600}
+  .breadcrumb a:hover{color:var(--blue-700)}
+
+  /* ── PAGE HEADER ── */
+  .page-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:28px}
+  .page-title{font-size:1.9rem;font-weight:800;letter-spacing:-0.04em;color:var(--navy)}
+  .page-subtitle{font-size:0.875rem;color:var(--muted);margin-top:4px}
+  .header-actions{display:flex;gap:10px;align-items:center}
+
+  /* ── BUTTONS ── */
+  .btn-primary{display:inline-flex;align-items:center;gap:8px;background:var(--grad-main);color:#fff;font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:0.875rem;padding:11px 22px;border:none;border-radius:11px;cursor:pointer;box-shadow:0 4px 16px rgba(79,114,245,0.38);transition:all 0.2s}
+  .btn-primary:hover{transform:translateY(-2px);box-shadow:0 7px 24px rgba(79,114,245,0.48)}
+  .btn-outline{display:inline-flex;align-items:center;gap:7px;background:var(--white);border:1.5px solid var(--border2);color:var(--blue-600);font-family:'Plus Jakarta Sans',sans-serif;font-size:0.875rem;font-weight:600;padding:10px 18px;border-radius:10px;cursor:pointer;transition:all 0.18s;box-shadow:var(--shadow-sm);text-decoration:none}
+  .btn-outline:hover{border-color:var(--blue-500);box-shadow:var(--shadow)}
+
+  /* ── LAYOUT ── */
+  .form-layout{display:grid;grid-template-columns:1fr 340px;gap:22px;align-items:start}
+
+  /* ── CARD ── */
+  .card{background:var(--white);border-radius:18px;box-shadow:var(--shadow);border:1px solid var(--border);overflow:hidden;margin-bottom:20px}
+  .card:last-child{margin-bottom:0}
+  .card-header{padding:16px 22px;border-bottom:1px solid var(--border);background:linear-gradient(90deg,var(--blue-50) 0%,rgba(238,232,255,0.4) 100%);display:flex;align-items:center;gap:10px}
+  .card-icon{width:32px;height:32px;border-radius:9px;display:flex;align-items:center;justify-content:center;font-size:0.95rem;flex-shrink:0}
+  .card-title-wrap{}
+  .card-title{font-size:0.85rem;font-weight:800;color:var(--navy)}
+  .card-subtitle{font-size:0.68rem;color:var(--muted);margin-top:1px}
+  .card-body{padding:22px}
+
+  /* ── FORM ── */
+  .section-label{font-size:0.67rem;text-transform:uppercase;letter-spacing:0.13em;color:var(--blue-600);font-weight:700;margin:20px 0 12px;padding-bottom:6px;border-bottom:2px solid var(--blue-100)}
+  .section-label:first-child{margin-top:0}
+  .form-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .form-row.three{grid-template-columns:1fr 1fr 1fr}
+  .form-group{display:flex;flex-direction:column;gap:5px;margin-bottom:14px}
+  .form-group.full{grid-column:1/-1}
+  .form-label{font-size:0.72rem;color:var(--text2);font-weight:700;letter-spacing:0.01em}
+  .form-label .req{color:var(--red);margin-left:2px}
+  .form-input,.form-select{background:var(--bg);border:1.5px solid var(--border);color:var(--navy);font-family:'Plus Jakarta Sans',sans-serif;font-size:0.875rem;padding:10px 13px;border-radius:10px;outline:none;width:100%;transition:all 0.18s}
+  .form-input:focus,.form-select:focus{border-color:var(--blue-500);background:#fff;box-shadow:0 0 0 3px rgba(79,114,245,0.1)}
+  .form-select option{background:#fff}
+  .form-input.error{border-color:var(--red);background:rgba(239,68,68,0.03)}
+  .field-error{font-size:0.68rem;color:var(--red);margin-top:2px;display:none}
+  .field-error.show{display:block}
+  .form-hint{font-size:0.68rem;color:var(--muted);margin-top:3px}
+
+  /* ── PHOTO UPLOAD ── */
+  .photo-upload-zone{border:2px dashed var(--border2);border-radius:16px;padding:28px 20px;text-align:center;cursor:pointer;transition:all 0.2s;margin-bottom:16px}
+  .photo-upload-zone:hover{border-color:var(--blue-500);background:rgba(79,114,245,0.04)}
+  .photo-upload-zone.has-photo{border-style:solid;border-color:rgba(16,185,129,0.4);background:rgba(16,185,129,0.03)}
+  .photo-preview{width:88px;height:88px;border-radius:50%;object-fit:cover;margin:0 auto 10px;display:block;border:3px solid var(--border2);box-shadow:var(--shadow)}
+  .photo-placeholder{width:88px;height:88px;border-radius:50%;background:var(--grad-main);display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:2rem;box-shadow:0 4px 14px rgba(79,114,245,0.3)}
+  .photo-upload-label{font-size:0.8rem;font-weight:600;color:var(--navy);margin-bottom:3px}
+  .photo-upload-hint{font-size:0.7rem;color:var(--muted)}
+  #photoFileInput{display:none}
+
+  /* ── PROGRESS STEPS ── */
+  .steps{display:flex;align-items:center;gap:0;margin-bottom:26px}
+  .step{display:flex;align-items:center;flex:1}
+  .step-dot{width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.78rem;font-weight:800;flex-shrink:0;transition:all 0.2s;border:2px solid var(--border2);background:var(--white);color:var(--muted)}
+  .step-dot.active{background:var(--grad-main);border-color:transparent;color:#fff;box-shadow:0 3px 10px rgba(79,114,245,0.35)}
+  .step-dot.done{background:var(--green);border-color:transparent;color:#fff}
+  .step-line{flex:1;height:2px;background:var(--border);margin:0 4px}
+  .step-line.done{background:var(--green)}
+  .step-name{font-size:0.65rem;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:var(--muted);margin-top:5px;text-align:center}
+  .step-name.active{color:var(--blue-600)}
+  .step-name.done{color:var(--green)}
+  .step-wrap{display:flex;flex-direction:column;align-items:center}
+
+  /* ── SIDE SUMMARY ── */
+  .summary-card{background:var(--white);border-radius:18px;box-shadow:var(--shadow);border:1px solid var(--border);overflow:hidden;position:sticky;top:24px}
+  .summary-hero{background:var(--grad-hero);padding:24px;text-align:center}
+  .summary-avatar{width:72px;height:72px;border-radius:50%;background:rgba(255,255,255,0.2);display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:1.8rem;border:3px solid rgba(255,255,255,0.25);overflow:hidden}
+  .summary-avatar img{width:100%;height:100%;object-fit:cover}
+  .summary-name{font-weight:800;font-size:1.05rem;color:#fff;letter-spacing:-0.02em}
+  .summary-sub{font-size:0.72rem;color:rgba(255,255,255,0.55);margin-top:3px}
+  .summary-body{padding:18px}
+  .summary-row{display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border);font-size:0.78rem}
+  .summary-row:last-child{border-bottom:none}
+  .summary-key{color:var(--muted);font-weight:500}
+  .summary-val{color:var(--navy);font-weight:700;text-align:right;max-width:55%}
+  .summary-badge{display:inline-block;font-size:0.65rem;font-weight:700;padding:2px 8px;border-radius:20px}
+  .badge-green{background:rgba(16,185,129,0.1);color:#059669}
+  .badge-yellow{background:rgba(245,158,11,0.12);color:#d97706}
+  .badge-gray{background:rgba(138,149,184,0.12);color:var(--muted)}
+
+  /* ── STEP NAVIGATION ── */
+  .step-nav{display:flex;justify-content:space-between;align-items:center;padding:18px 22px;border-top:1px solid var(--border);background:linear-gradient(90deg,var(--blue-50),#fff 70%)}
+  .step-nav-info{font-size:0.78rem;color:var(--muted)}
+  .step-nav-btns{display:flex;gap:10px}
+
+  /* ── STEP PANELS ── */
+  .step-panel{display:none}
+  .step-panel.active{display:block}
+
+  /* ── SUCCESS ── */
+  .success-screen{display:none;text-align:center;padding:50px 30px}
+  .success-screen.show{display:block}
+  .success-icon{width:80px;height:80px;border-radius:50%;background:linear-gradient(135deg,#10b981,#34d399);display:flex;align-items:center;justify-content:center;margin:0 auto 18px;font-size:2.2rem;box-shadow:0 8px 24px rgba(16,185,129,0.3)}
+  .success-title{font-size:1.6rem;font-weight:800;color:var(--navy);margin-bottom:8px;letter-spacing:-0.03em}
+  .success-sub{font-size:0.9rem;color:var(--muted);margin-bottom:28px}
+  .success-btns{display:flex;gap:12px;justify-content:center}
+
+  ::-webkit-scrollbar{width:5px} ::-webkit-scrollbar-track{background:var(--blue-50)} ::-webkit-scrollbar-thumb{background:var(--blue-100);border-radius:3px} ::-webkit-scrollbar-thumb:hover{background:var(--blue-400)}
+</style>
+</head>
+<body>
+
+<div id="sidebar-mount"></div>
+
+<main class="main">
+  <div class="breadcrumb">
+    <a href="drivers.html">← Chauffeurs</a>
+    <span>/</span>
+    <span>Nouveau chauffeur</span>
+  </div>
+
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Nouveau chauffeur</h1>
+      <p class="page-subtitle">Remplissez les informations étape par étape</p>
+    </div>
+    <div class="header-actions">
+      <a href="drivers.html" class="btn-outline">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+        Annuler
+      </a>
+    </div>
+  </div>
+
+  <!-- PROGRESS STEPS -->
+  <div class="steps" id="stepsBar">
+    <div class="step-wrap">
+      <div class="step-dot active" id="dot-0">1</div>
+      <div class="step-name active" id="sname-0">Identité</div>
+    </div>
+    <div class="step-line" id="line-0"></div>
+    <div class="step-wrap">
+      <div class="step-dot" id="dot-1">2</div>
+      <div class="step-name" id="sname-1">Permis</div>
+    </div>
+    <div class="step-line" id="line-1"></div>
+    <div class="step-wrap">
+      <div class="step-dot" id="dot-2">3</div>
+      <div class="step-name" id="sname-2">Urgence</div>
+    </div>
+    <div class="step-line" id="line-2"></div>
+    <div class="step-wrap">
+      <div class="step-dot" id="dot-3">4</div>
+      <div class="step-name" id="sname-3">Documents</div>
+    </div>
+  </div>
+
+  <div class="form-layout">
+
+    <!-- LEFT : FORM CARD -->
+    <div>
+      <div class="card" id="formCard">
+
+        <!-- ══ STEP 1 : IDENTITÉ ══ -->
+        <div class="step-panel active" id="panel-0">
+          <div class="card-header">
+            <div class="card-icon" style="background:#eff3ff">👤</div>
+            <div class="card-title-wrap">
+              <div class="card-title">Informations personnelles</div>
+              <div class="card-subtitle">Identité civile du chauffeur</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <!-- Photo -->
+            <div class="photo-upload-zone" id="photoZone" onclick="document.getElementById('photoFileInput').click()">
+              <div class="photo-placeholder" id="photoPlaceholder">📷</div>
+              <img id="photoPreviewImg" class="photo-preview" style="display:none" alt="">
+              <div class="photo-upload-label">Photo de profil</div>
+              <div class="photo-upload-hint">Cliquer pour importer · JPG, PNG</div>
+            </div>
+            <input type="file" id="photoFileInput" accept="image/*" onchange="handlePhotoPreview(event)">
+
+            <div class="section-label">Identité</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Nom <span class="req">*</span></label>
+                <input class="form-input" id="f-nom" placeholder="Nom de famille" oninput="syncSummary()">
+                <span class="field-error" id="err-nom">Ce champ est requis</span>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Prénom <span class="req">*</span></label>
+                <input class="form-input" id="f-prenom" placeholder="Prénom" oninput="syncSummary()">
+                <span class="field-error" id="err-prenom">Ce champ est requis</span>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Date de naissance</label>
+                <input class="form-input" id="f-ddn" type="date">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Lieu de naissance</label>
+                <input class="form-input" id="f-lieu" placeholder="Ville, Pays">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Nationalité</label>
+                <input class="form-input" id="f-nat" placeholder="Ex : Française">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Genre</label>
+                <select class="form-select" id="f-genre">
+                  <option value="">— Sélectionner —</option>
+                  <option>Masculin</option><option>Féminin</option><option>Non précisé</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Situation familiale</label>
+                <select class="form-select" id="f-sit">
+                  <option value="">— Sélectionner —</option>
+                  <option>Célibataire</option><option>Marié(e)</option><option>Divorcé(e)</option><option>Veuf/Veuve</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Nombre d'enfants</label>
+                <input class="form-input" id="f-enfants" type="number" min="0" placeholder="0">
+              </div>
+            </div>
+
+            <div class="section-label">Coordonnées</div>
+            <div class="form-row">
+              <div class="form-group full">
+                <label class="form-label">Adresse complète</label>
+                <input class="form-input" id="f-adresse" placeholder="Rue, Code postal, Ville">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Téléphone <span class="req">*</span></label>
+                <input class="form-input" id="f-tel" type="tel" placeholder="+33 6 00 00 00 00" oninput="syncSummary()">
+                <span class="field-error" id="err-tel">Ce champ est requis</span>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Email <span class="req">*</span></label>
+                <input class="form-input" id="f-email" type="email" placeholder="email@exemple.com" oninput="syncSummary()">
+                <span class="field-error" id="err-email">Ce champ est requis</span>
+              </div>
+            </div>
+
+            <div class="section-label">🔐 Compte chauffeur</div>
+            <p style="font-size:0.78rem;color:var(--muted);margin-bottom:14px">Ces identifiants permettront au chauffeur de se connecter à son espace personnel.</p>
+            <div class="form-row">
+              <div class="form-group full">
+                <label class="form-label">Identifiant de connexion</label>
+                <input class="form-input" id="f-login-id" placeholder="Rempli automatiquement depuis l'email" disabled style="opacity:0.6;cursor:not-allowed">
+                <span class="form-hint">L'email sert d'identifiant de connexion</span>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Mot de passe <span class="req">*</span></label>
+                <input class="form-input" id="f-password" type="password" placeholder="Minimum 6 caractères">
+                <span class="field-error" id="err-password">Ce champ est requis</span>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Confirmer le mot de passe <span class="req">*</span></label>
+                <input class="form-input" id="f-password2" type="password" placeholder="Répéter le mot de passe">
+                <span class="field-error" id="err-password2">Les mots de passe ne correspondent pas</span>
+              </div>
+            </div>
+          </div>
+          <div class="step-nav">
+            <span class="step-nav-info">Étape 1 sur 4</span>
+            <div class="step-nav-btns">
+              <button class="btn-primary" onclick="goStep(1)">
+                Suivant
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ STEP 2 : PERMIS ══ -->
+        <div class="step-panel" id="panel-1">
+          <div class="card-header">
+            <div class="card-icon" style="background:#eff3ff">🪪</div>
+            <div class="card-title-wrap">
+              <div class="card-title">Permis de conduire</div>
+              <div class="card-subtitle">Informations sur le permis du chauffeur</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="section-label">Permis de conduire</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Numéro de permis</label>
+                <input class="form-input" id="f-pnum" placeholder="N° permis">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Catégorie(s)</label>
+                <input class="form-input" id="f-pcat" placeholder="B, C, D, CE..." oninput="syncSummary()">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Date d'obtention</label>
+                <input class="form-input" id="f-pobt" type="date">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Date d'expiration</label>
+                <input class="form-input" id="f-pexp" type="date" oninput="syncSummary()">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Pays de délivrance</label>
+                <input class="form-input" id="f-ppays" placeholder="France">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Statut <span class="req">*</span></label>
+                <select class="form-select" id="f-statut" onchange="syncSummary()">
+                  <option value="actif">Actif</option>
+                  <option value="inactif">Inactif</option>
+                  <option value="en_conge">En congé</option>
+                </select>
+              </div>
+            </div>
+          </div>
+          <div class="step-nav">
+            <span class="step-nav-info">Étape 2 sur 4</span>
+            <div class="step-nav-btns">
+              <button class="btn-outline" onclick="goStep(0)">← Précédent</button>
+              <button class="btn-primary" onclick="goStep(2)">
+                Suivant
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ STEP 3 : URGENCE ══ -->
+        <div class="step-panel" id="panel-2">
+          <div class="card-header">
+            <div class="card-icon" style="background:#fff0f0">🚨</div>
+            <div class="card-title-wrap">
+              <div class="card-title">Contact d'urgence</div>
+              <div class="card-subtitle">Personne à contacter en cas d'urgence</div>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="section-label">Contact d'urgence</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Nom</label>
+                <input class="form-input" id="f-unom" placeholder="Nom">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Prénom</label>
+                <input class="form-input" id="f-uprenom" placeholder="Prénom">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Lien avec le chauffeur</label>
+                <select class="form-select" id="f-ulien">
+                  <option value="">— Sélectionner —</option>
+                  <option>Parent / Frère / Sœur</option>
+                  <option>Conjoint</option>
+                  <option>Ami / Voisin</option>
+                  <option>Autre</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Téléphone</label>
+                <input class="form-input" id="f-utel" type="tel" placeholder="+33 6 00 00 00 00">
+              </div>
+            </div>
+          </div>
+          <div class="step-nav">
+            <span class="step-nav-info">Étape 3 sur 4</span>
+            <div class="step-nav-btns">
+              <button class="btn-outline" onclick="goStep(1)">← Précédent</button>
+              <button class="btn-primary" onclick="goStep(3)">
+                Suivant
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ STEP 4 : DOCUMENTS OFFICIELS ══ -->
+        <div class="step-panel" id="panel-3">
+          <div class="card-header">
+            <div class="card-icon" style="background:#f0fff4">📄</div>
+            <div class="card-title-wrap">
+              <div class="card-title">Documents officiels</div>
+              <div class="card-subtitle">Pièce d'identité, cartes professionnelles, RIB</div>
+            </div>
+          </div>
+          <div class="card-body">
+
+            <div class="section-label">🪪 Pièce d'identité</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Type de document</label>
+                <select class="form-select" id="f-id-type">
+                  <option value="">— Sélectionner —</option>
+                  <option>Carte nationale d'identité</option>
+                  <option>Passeport</option>
+                  <option>Titre de séjour</option>
+                  <option>Autre</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Numéro</label>
+                <input class="form-input" id="f-id-num" placeholder="N° du document">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Date de délivrance</label>
+                <input class="form-input" id="f-id-deliv" type="date">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Date d'expiration</label>
+                <input class="form-input" id="f-id-exp" type="date">
+              </div>
+            </div>
+
+            <div class="section-label">💳 Carte conducteur</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Numéro</label>
+                <input class="form-input" id="f-cc-num" placeholder="N° carte conducteur">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Date d'expiration</label>
+                <input class="form-input" id="f-cc-exp" type="date">
+              </div>
+            </div>
+
+            <div class="section-label">📋 Carte qualification FIMO / FCO</div>
+            <div class="form-row three">
+              <div class="form-group">
+                <label class="form-label">Type</label>
+                <select class="form-select" id="f-fimo-type">
+                  <option value="">— Sélectionner —</option>
+                  <option>FIMO</option><option>FCO</option><option>FIMO + FCO</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Numéro</label>
+                <input class="form-input" id="f-fimo-num" placeholder="N° qualification">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Date d'obtention</label>
+                <input class="form-input" id="f-fimo-obt" type="date">
+              </div>
+              <div class="form-group full">
+                <label class="form-label">Date d'expiration</label>
+                <input class="form-input" id="f-fimo-exp" type="date" style="max-width:calc(33% - 10px)">
+              </div>
+            </div>
+
+            <div class="section-label">🏥 Carte Vitale / Sécurité sociale</div>
+            <div class="form-row">
+              <div class="form-group full">
+                <label class="form-label">Numéro de sécurité sociale</label>
+                <input class="form-input" id="f-ss-num" placeholder="Ex : 1 85 03 75 116 001 42">
+                <span class="form-hint">15 chiffres — ne jamais partager sans nécessité</span>
+              </div>
+            </div>
+
+            <div class="section-label">🏦 RIB</div>
+            <div class="form-row">
+              <div class="form-group full">
+                <label class="form-label">Titulaire du compte</label>
+                <input class="form-input" id="f-rib-titulaire" placeholder="Nom du titulaire">
+              </div>
+              <div class="form-group full">
+                <label class="form-label">IBAN</label>
+                <input class="form-input" id="f-rib-iban" placeholder="FR76 0000 0000 0000 0000 0000 000">
+              </div>
+              <div class="form-group">
+                <label class="form-label">BIC / SWIFT</label>
+                <input class="form-input" id="f-rib-bic" placeholder="BNPAFRPPXXX">
+              </div>
+            </div>
+
+            <div class="section-label">🏗️ Carte BTP</div>
+            <div class="form-row">
+              <div class="form-group">
+                <label class="form-label">Numéro de carte</label>
+                <input class="form-input" id="f-btp-num" placeholder="N° carte BTP">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Date de délivrance</label>
+                <input class="form-input" id="f-btp-deliv" type="date">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Date d'expiration</label>
+                <input class="form-input" id="f-btp-exp" type="date">
+              </div>
+            </div>
+
+          </div>
+          <div class="step-nav">
+            <span class="step-nav-info">Étape 4 sur 4 — Dernière étape</span>
+            <div class="step-nav-btns">
+              <button class="btn-outline" onclick="goStep(2)">← Précédent</button>
+              <button class="btn-primary" onclick="saveDriver()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+                Enregistrer le chauffeur
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- ══ SUCCESS ══ -->
+        <div class="success-screen" id="successScreen">
+          <div class="success-icon">✓</div>
+          <div class="success-title">Chauffeur enregistré !</div>
+          <div class="success-sub" id="successSub">La fiche a été créée avec succès.</div>
+          <div class="success-btns">
+            <button class="btn-primary" id="btnGoToFiche">Voir la fiche →</button>
+            <a href="drivers.html" class="btn-outline">Retour à la liste</a>
+            <button class="btn-outline" onclick="resetForm()">Ajouter un autre</button>
+          </div>
+        </div>
+
+      </div><!-- /card -->
+    </div>
+
+    <!-- RIGHT : SUMMARY CARD -->
+    <div>
+      <div class="summary-card">
+        <div class="summary-hero">
+          <div class="summary-avatar" id="sumAvatar">👤</div>
+          <div class="summary-name" id="sumName">Nouveau chauffeur</div>
+          <div class="summary-sub" id="sumSub">Remplissez les champs pour voir le récap</div>
+        </div>
+        <div class="summary-body">
+          <div class="summary-row">
+            <span class="summary-key">Téléphone</span>
+            <span class="summary-val" id="sumTel">—</span>
+          </div>
+          <div class="summary-row">
+            <span class="summary-key">Email</span>
+            <span class="summary-val" id="sumEmail">—</span>
+          </div>
+          <div class="summary-row">
+            <span class="summary-key">Permis</span>
+            <span class="summary-val" id="sumPermis">—</span>
+          </div>
+          <div class="summary-row">
+            <span class="summary-key">Exp. permis</span>
+            <span class="summary-val" id="sumPermisExp">—</span>
+          </div>
+          <div class="summary-row">
+            <span class="summary-key">Statut</span>
+            <span class="summary-val" id="sumStatut"><span class="summary-badge badge-green">Actif</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div><!-- /form-layout -->
+</main>
+
+
+<script src="api.js"></script>
+<script src="sidebar.js" data-page="drivers"></script>
+<script src="add-chauffeur.js"></script>
+</body>
+</html>

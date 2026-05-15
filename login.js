@@ -1,9 +1,17 @@
 document.addEventListener('DOMContentLoaded', async () => {
+  const token = localStorage.getItem('token');
+
+  // Très important :
+  // Si pas de token local, on reste sur la page login.
+  if (!token) return;
+
   try {
     await apiFetch('/auth/me');
-    window.location.href = 'drivers.html';
+    window.location.replace('drivers.html');
   } catch {
-    // normal before login
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    sessionStorage.clear();
   }
 });
 
@@ -41,12 +49,11 @@ async function tryLogin() {
       localStorage.setItem('user', JSON.stringify(data.user));
     }
 
-    console.log('TOKEN SAVED =', localStorage.getItem('token'));
-
-    window.location.href = 'drivers.html';
+    window.location.replace('drivers.html');
   } catch (error) {
     console.error('LOGIN ERROR =', error);
     showError(error.message);
+
     document.getElementById('loginUser').classList.add('error');
     document.getElementById('loginPass').classList.add('error');
   } finally {

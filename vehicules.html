@@ -78,10 +78,16 @@
       <h1 class="page-title">Vehicules</h1>
       <p class="page-subtitle">Gerez votre flotte et les echeances reglementaires</p>
     </div>
-    <button class="btn-primary" onclick="window.location.href='add-vehicule.html'">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      Nouveau vehicule
-    </button>
+    <div style="display:flex;gap:10px;flex-wrap:wrap">
+      <button class="btn-primary" onclick="window.location.href='tracking.html'">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 10c0 7-9 12-9 12S3 17 3 10a9 9 0 1 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+        Carte flotte
+      </button>
+      <button class="btn-primary" onclick="window.location.href='add-vehicule.html'">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Nouveau vehicule
+      </button>
+    </div>
   </div>
 
   <div class="stats-bar">

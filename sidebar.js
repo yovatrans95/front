@@ -6,7 +6,7 @@
 <aside class="sidebar">
   <div class="sb-top">
     <div class="logo">
-      
+      <div class="logo-icon">🚌</div>
       <div>
         <div class="logo-name">Yovatrans</div>
         <div class="logo-sub">Plateforme chauffeurs</div>
@@ -45,6 +45,24 @@
         <circle cx="18.5" cy="18.5" r="2.5"/>
       </svg>
       Véhicules
+    </a>
+
+
+
+    <a class="nav-item" href="liste.html" data-page="tasks">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 11l3 3L22 4"/>
+        <path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>
+      </svg>
+      Tâches
+    </a>
+
+    <a class="nav-item" href="tracking.html" data-page="tracking">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 10c0 7-9 12-9 12S3 17 3 10a9 9 0 1 1 18 0z"/>
+        <circle cx="12" cy="10" r="3"/>
+      </svg>
+      Carte flotte
     </a>
 
     <div class="nav-section">Système</div>

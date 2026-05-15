@@ -139,7 +139,10 @@ function renderTable() {
       <td>${renderExpiry(vehicle.assurance_expiration, 'assurance')}</td>
       <td>${renderExpiry(vehicle.controle_technique_expiration, 'controle')}</td>
       <td>${renderStatutBadge(vehicle.statut)}</td>
-      <td><span class="view-link" onclick="event.stopPropagation();go('${vehicle._id}')">Voir fiche</span></td>
+      <td>
+        <span class="view-link" onclick="event.stopPropagation();go('${vehicle._id}')">Voir fiche</span>
+        <span class="view-link" style="margin-left:10px;color:var(--blue-600)" onclick="event.stopPropagation();goMap('${vehicle.immatriculation || ''}')">Carte</span>
+      </td>
     </tr>
   `).join('');
 }
@@ -298,4 +301,10 @@ function fmtDate(value) {
   } catch {
     return value;
   }
+}
+
+
+function goMap(immat) {
+  const plate = encodeURIComponent(immat || '');
+  window.location.href = plate ? `tracking.html?plate=${plate}` : 'tracking.html';
 }

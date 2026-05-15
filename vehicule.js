@@ -261,11 +261,19 @@ function renderDocStatus(def) {
 
 function toggleEdit() {
   const panel = document.getElementById('editPanel');
-  const isOpen = panel.classList.toggle('open');
-  if (!isOpen) return;
-  fillEdit();
-  syncEditLocationVisibility();
-  panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  if (!panel) return;
+
+  const isOpening = !panel.classList.contains('open');
+  panel.classList.toggle('open');
+
+  if (isOpening) {
+    fillEdit();
+    syncEditLocationVisibility();
+
+    setTimeout(() => {
+      panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 50);
+  }
 }
 function renderFiles() {
   const list = document.getElementById('docList');
@@ -343,60 +351,69 @@ async function confirmDeleteDoc() {
 }
 
 function fillEdit() {
-  const map = {
-    'e-immatriculation': 'immatriculation',
-    'e-marque': 'marque',
-    'e-modele': 'modele',
-    'e-type': 'type_vehicule',
-    'e-annee': 'annee',
-    'e-energie': 'energie',
-    'e-couleur': 'couleur',
-    'e-vin': 'vin',
-    'e-kilometrage': 'kilometrage',
-    'e-places': 'nombre_places',
-    'e-charge': 'charge_utile',
-    'e-mec': 'date_mise_en_circulation',
-    'e-statut': 'statut',
-    'e-mode-possession': 'mode_possession',
-    'e-observations': 'observations',
-    'e-cg-num': 'carte_grise_numero',
-    'e-cg-date': 'carte_grise_date_emission',
-    'e-cg-titulaire': 'carte_grise_titulaire',
-    'e-cg-mec': 'carte_grise_date_mise_circulation',
-    'e-loc-ref': 'contrat_location_reference',
-    'e-loc-bailleur': 'contrat_location_bailleur',
-    'e-loc-debut': 'contrat_location_date_debut',
-    'e-loc-fin': 'contrat_location_date_fin',
-    'e-loc-montant': 'contrat_location_montant',
-    'e-ct-centre': 'controle_technique_centre',
-    'e-ct-date': 'controle_technique_date_controle',
-    'e-ct-exp': 'controle_technique_expiration',
-    'e-assurance-compagnie': 'assurance_compagnie',
-    'e-assurance-police': 'assurance_numero_police',
-    'e-assurance-debut': 'assurance_date_debut',
-    'e-assurance-exp': 'assurance_expiration',
-    'e-licence-num': 'licence_transport_numero',
-    'e-licence-autorite': 'licence_transport_autorite',
-    'e-licence-deliv': 'licence_transport_delivrance',
-    'e-licence-exp': 'licence_transport_expiration',
-    'e-recepisse-num': 'recepisse_transport_numero',
-    'e-recepisse-autorite': 'recepisse_transport_autorite',
-    'e-recepisse-deliv': 'recepisse_transport_delivrance',
-    'e-recepisse-exp': 'recepisse_transport_expiration',
-    'e-chrono-marque': 'chronotachygraphe_marque',
-    'e-chrono-num': 'chronotachygraphe_numero',
-    'e-chrono-etal': 'chronotachygraphe_etalonnage',
-    'e-chrono-exp': 'chronotachygraphe_expiration',
-    'e-limiteur-marque': 'limiteur_marque',
-    'e-limiteur-num': 'limiteur_numero',
-    'e-limiteur-verif': 'limiteur_verification',
-    'e-limiteur-exp': 'limiteur_expiration'
-  };
+  if (!vehicle) {
+    console.log('Aucun vehicule charge');
+    return;
+  }
 
-  Object.entries(map).forEach(([id, key]) => {
-    const el = document.getElementById(id);
-    if (el) el.value = vehicle[key] ?? '';
-  });
+  console.log('Vehicule charge dans le formulaire :', vehicle);
+
+  setEditValue('e-immatriculation', vehicle.immatriculation);
+  setEditValue('e-marque', vehicle.marque);
+  setEditValue('e-modele', vehicle.modele);
+  setEditValue('e-type', vehicle.type_vehicule);
+  setEditValue('e-annee', vehicle.annee);
+  setEditValue('e-energie', vehicle.energie);
+  setEditValue('e-couleur', vehicle.couleur);
+  setEditValue('e-vin', vehicle.vin);
+  setEditValue('e-kilometrage', vehicle.kilometrage);
+  setEditValue('e-places', vehicle.nombre_places);
+  setEditValue('e-charge', vehicle.charge_utile);
+  setEditValue('e-mec', vehicle.date_mise_en_circulation);
+
+  setEditValue('e-statut', vehicle.statut || 'actif');
+  setEditValue('e-mode-possession', vehicle.mode_possession || 'propre');
+  setEditValue('e-observations', vehicle.observations);
+
+  setEditValue('e-cg-num', vehicle.carte_grise_numero);
+  setEditValue('e-cg-date', vehicle.carte_grise_date_emission);
+  setEditValue('e-cg-titulaire', vehicle.carte_grise_titulaire);
+  setEditValue('e-cg-mec', vehicle.carte_grise_date_mise_circulation);
+
+  setEditValue('e-loc-ref', vehicle.contrat_location_reference);
+  setEditValue('e-loc-bailleur', vehicle.contrat_location_bailleur);
+  setEditValue('e-loc-debut', vehicle.contrat_location_date_debut);
+  setEditValue('e-loc-fin', vehicle.contrat_location_date_fin);
+  setEditValue('e-loc-montant', vehicle.contrat_location_montant);
+
+  setEditValue('e-ct-centre', vehicle.controle_technique_centre);
+  setEditValue('e-ct-date', vehicle.controle_technique_date_controle);
+  setEditValue('e-ct-exp', vehicle.controle_technique_expiration);
+
+  setEditValue('e-assurance-compagnie', vehicle.assurance_compagnie);
+  setEditValue('e-assurance-police', vehicle.assurance_numero_police);
+  setEditValue('e-assurance-debut', vehicle.assurance_date_debut);
+  setEditValue('e-assurance-exp', vehicle.assurance_expiration);
+
+  setEditValue('e-licence-num', vehicle.licence_transport_numero);
+  setEditValue('e-licence-autorite', vehicle.licence_transport_autorite);
+  setEditValue('e-licence-deliv', vehicle.licence_transport_delivrance);
+  setEditValue('e-licence-exp', vehicle.licence_transport_expiration);
+
+  setEditValue('e-recepisse-num', vehicle.recepisse_transport_numero);
+  setEditValue('e-recepisse-autorite', vehicle.recepisse_transport_autorite);
+  setEditValue('e-recepisse-deliv', vehicle.recepisse_transport_delivrance);
+  setEditValue('e-recepisse-exp', vehicle.recepisse_transport_expiration);
+
+  setEditValue('e-chrono-marque', vehicle.chronotachygraphe_marque);
+  setEditValue('e-chrono-num', vehicle.chronotachygraphe_numero);
+  setEditValue('e-chrono-etal', vehicle.chronotachygraphe_etalonnage);
+  setEditValue('e-chrono-exp', vehicle.chronotachygraphe_expiration);
+
+  setEditValue('e-limiteur-marque', vehicle.limiteur_marque);
+  setEditValue('e-limiteur-num', vehicle.limiteur_numero);
+  setEditValue('e-limiteur-verif', vehicle.limiteur_verification);
+  setEditValue('e-limiteur-exp', vehicle.limiteur_expiration);
 }
 async function handleDocs(event) {
   const files = Array.from(event.target.files || []);
@@ -550,6 +567,23 @@ async function deleteVehicle() {
   } catch (error) {
     toast(error.message || 'Erreur suppression');
   }
+}
+function setEditValue(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+
+  let finalValue = value;
+
+  if (finalValue === null || finalValue === undefined) {
+    finalValue = '';
+  }
+
+  if (el.type === 'date' && finalValue) {
+    finalValue = String(finalValue).slice(0, 10);
+  }
+
+  el.value = finalValue;
+  el.placeholder = finalValue || '';
 }
 
 function infoItem(label, value) {

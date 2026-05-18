@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Yovatrans — Stations carburant</title>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+<style>
+  :root{
+    --bg:#f0f4ff;--white:#fff;--border:rgba(99,130,255,0.15);--border2:rgba(99,130,255,0.28);
+    --blue-50:#eff3ff;--blue-100:#dce5ff;--blue-400:#7b9ef8;--blue-500:#4f72f5;--blue-600:#3a5ce4;--blue-700:#2a47cc;
+    --navy:#1a2c6e;--text2:#4a5580;--muted:#8a95b8;--grad-main:linear-gradient(135deg,#4f72f5 0%,#7c4fe0 100%);
+    --grad-soft:linear-gradient(135deg,#eff3ff 0%,#e8e4ff 100%);--grad-hero:linear-gradient(160deg,#1e3a8a 0%,#3a5ce4 45%,#7c4fe0 100%);
+    --shadow-sm:0 1px 4px rgba(79,114,245,0.09);--shadow:0 4px 18px rgba(79,114,245,0.13);--shadow-lg:0 14px 44px rgba(79,114,245,0.2);
+    --green:#10b981;--red:#ef4444;--orange:#f59e0b;--cyan:#06b6d4;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%}
+  body{font-family:'Plus Jakarta Sans',sans-serif;background:var(--bg);color:var(--navy);min-height:100vh;
+    background-image:radial-gradient(ellipse 70% 50% at 15% -5%,rgba(79,114,245,0.09) 0%,transparent 60%),radial-gradient(ellipse 55% 40% at 85% 105%,rgba(124,79,224,0.07) 0%,transparent 60%);}
+
+  .sidebar{position:fixed;left:0;top:0;bottom:0;width:240px;background:var(--grad-hero);display:flex;flex-direction:column;z-index:100;box-shadow:4px 0 30px rgba(30,58,138,0.3)}
+  .sb-top{padding:30px 26px 22px;border-bottom:1px solid rgba(255,255,255,0.1)}
+  .logo{display:flex;align-items:center;gap:11px}.logo-img{width:42px;height:42px;object-fit:contain;filter:drop-shadow(0 6px 12px rgba(0,0,0,.18))}.logo-name{font-weight:800;font-size:1.2rem;color:#fff;letter-spacing:-0.02em}.logo-sub{font-size:0.65rem;color:rgba(255,255,255,0.45);font-weight:400;letter-spacing:0.05em;margin-top:1px}
+  .nav{padding:18px 14px;flex:1}.nav-section{font-size:0.6rem;text-transform:uppercase;letter-spacing:0.14em;color:rgba(255,255,255,0.35);padding:0 12px;margin:14px 0 5px}.nav-section:first-child{margin-top:0}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;font-size:0.875rem;font-weight:500;color:rgba(255,255,255,0.6);text-decoration:none;transition:all 0.18s;margin-bottom:2px}.nav-item:hover{color:#fff;background:rgba(255,255,255,0.1)}.nav-item.active{color:#fff;background:rgba(255,255,255,0.18);box-shadow:inset 0 0 0 1px rgba(255,255,255,0.18)}.nav-item svg{width:17px;height:17px;flex-shrink:0}.sb-footer{padding:14px 26px;border-top:1px solid rgba(255,255,255,0.1);font-size:0.7rem;color:rgba(255,255,255,0.3)}
+
+  .main{margin-left:240px;padding:36px 40px;max-width:calc(100vw - 240px)}
+  .page-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:24px}.page-title{font-size:1.95rem;font-weight:800;letter-spacing:-0.04em}.page-subtitle{font-size:0.875rem;color:var(--muted);margin-top:4px;line-height:1.5}.header-actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+  .btn-primary,.btn-outline{display:inline-flex;align-items:center;justify-content:center;gap:8px;font-family:'Plus Jakarta Sans',sans-serif;font-weight:700;font-size:.86rem;padding:11px 17px;border-radius:11px;cursor:pointer;transition:.2s;text-decoration:none;white-space:nowrap}.btn-primary{background:var(--grad-main);color:#fff;border:none;box-shadow:0 4px 16px rgba(79,114,245,.38)}.btn-primary:hover{transform:translateY(-2px);box-shadow:0 7px 24px rgba(79,114,245,.48)}.btn-outline{background:var(--white);border:1.5px solid var(--border2);color:var(--blue-600);box-shadow:var(--shadow-sm)}.btn-outline:hover{border-color:var(--blue-500);box-shadow:var(--shadow)}
+
+  .filters-card{background:var(--white);border:1px solid var(--border);border-radius:22px;padding:18px;margin-bottom:22px;box-shadow:var(--shadow);display:grid;grid-template-columns:1.5fr .8fr .8fr .8fr auto;gap:12px;align-items:end}.field label{display:block;font-size:.68rem;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-weight:800;margin-bottom:7px}.input,.select{width:100%;height:44px;border:1.5px solid var(--border2);border-radius:12px;background:#fff;padding:0 14px;color:var(--navy);font-family:inherit;font-weight:600;outline:none}.input:focus,.select:focus{border-color:var(--blue-500);box-shadow:0 0 0 4px rgba(79,114,245,.12)}
+
+  .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:16px;margin-bottom:22px}.stat{background:var(--white);border:1px solid var(--border);border-radius:18px;padding:20px;box-shadow:var(--shadow-sm)}.stat-label{font-size:.75rem;color:#8290bd;text-transform:uppercase;letter-spacing:.08em;font-weight:800}.stat-value{font-size:1.55rem;font-weight:800;color:#10276d;margin-top:7px}.stat-sub{font-size:.78rem;color:var(--text2);margin-top:3px}
+
+  .layout{display:grid;grid-template-columns:minmax(620px,1fr) 380px;gap:22px;align-items:start}.map-card{background:#dbeafe;border:1px solid var(--border);border-radius:24px;box-shadow:var(--shadow);padding:14px;position:relative;overflow:hidden}.map-top{position:absolute;left:28px;top:28px;z-index:700;display:flex;gap:8px;flex-wrap:wrap}.map-tool{border:none;background:rgba(255,255,255,.95);color:var(--blue-700);border-radius:12px;padding:9px 12px;font-weight:800;font-family:inherit;box-shadow:var(--shadow);cursor:pointer}.map-tool:hover{background:#fff;transform:translateY(-1px)}
+  #map{height:650px;width:100%;border-radius:18px;overflow:hidden;background:#dbeafe;position:relative;z-index:1}.leaflet-container{font-family:'Plus Jakarta Sans',sans-serif;background:#dbeafe;border-radius:18px}.leaflet-pane,.leaflet-tile,.leaflet-marker-icon,.leaflet-marker-shadow,.leaflet-tile-container,.leaflet-pane>svg,.leaflet-pane>canvas,.leaflet-zoom-box,.leaflet-image-layer,.leaflet-layer{position:absolute;left:0;top:0}.leaflet-tile{user-select:none;-webkit-user-drag:none}.leaflet-control-container .leaflet-top,.leaflet-control-container .leaflet-bottom{z-index:800}.leaflet-popup-content-wrapper{border-radius:16px;box-shadow:var(--shadow-lg)}.leaflet-popup-content{margin:14px;min-width:210px}.station-dot{width:34px;height:34px;border-radius:50%;display:flex;align-items:center;justify-content:center;border:3px solid #fff;box-shadow:0 8px 18px rgba(26,44,110,.25);font-size:.72rem;font-weight:900;color:#fff}.station-dot.total{background:#ef4444}.station-dot.esso{background:#0f6fe4}.station-dot.other{background:#4f72f5}.station-dot.best{background:#10b981}
+
+  .list-card{background:var(--white);border:1px solid var(--border);border-radius:24px;box-shadow:var(--shadow);overflow:hidden;height:680px;display:flex;flex-direction:column}.list-head{padding:20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}.list-title{font-weight:800;font-size:1.05rem}.pill{font-size:.72rem;font-weight:800;padding:6px 10px;border-radius:999px;background:var(--blue-50);color:var(--blue-600)}.list-body{padding:12px;overflow:auto;display:flex;flex-direction:column;gap:10px}.station-row{border:1px solid var(--blue-100);border-radius:16px;padding:14px;display:grid;grid-template-columns:1fr auto;gap:12px;background:#fff;cursor:pointer;transition:.18s}.station-row:hover{transform:translateY(-1px);box-shadow:var(--shadow);border-color:var(--blue-400)}.station-name{font-size:.93rem;font-weight:800;color:var(--navy)}.station-addr{font-size:.78rem;color:var(--muted);line-height:1.45;margin-top:4px}.price{align-self:center;font-weight:900;color:#047857;background:#dcfce7;border:1px solid #a7f3d0;border-radius:999px;padding:12px 13px;white-space:nowrap}.tags{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}.tag{font-size:.68rem;font-weight:800;border-radius:999px;padding:5px 8px;background:var(--blue-50);color:var(--blue-600)}.tag.orange{background:#fff7ed;color:#c2410c}.tag.red{background:#fef2f2;color:#dc2626}.tag.green{background:#ecfdf5;color:#047857}.tag.blue{background:#eff6ff;color:#1d4ed8}.tag.cyan{background:#ecfeff;color:#0e7490}.price.best-price{color:#065f46;background:#a7f3d0;border-color:#6ee7b7}.empty{padding:28px;text-align:center;color:var(--muted);font-weight:600}
+  .status-line{margin-top:10px;font-size:.78rem;color:var(--muted)}
+
+  @media(max-width:1200px){.stats{grid-template-columns:repeat(2,1fr)}.layout{grid-template-columns:1fr}.list-card{height:auto;max-height:520px}.filters-card{grid-template-columns:1fr 1fr}.filters-card .btn-primary{height:44px}.main{padding:28px}}
+</style>
+</head>
+<body>
+<script src="sidebar.js" data-page="stations"></script>
+<main class="main">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Stations carburant</h1>
+      <p class="page-subtitle">Carte directe API officielle prix-carburants + détection enseigne par proximité OSM. Aucun backend nécessaire.</p>
+      <div class="status-line" id="statusLine">Chargement...</div>
+    </div>
+    <div class="header-actions">
+      <button class="btn-outline" id="btnRefresh">Actualiser</button>
+      <button class="btn-primary" id="btnFit">Ajuster la carte</button>
+    </div>
+  </div>
+
+  <section class="filters-card">
+    <div class="field">
+      <label>Adresse / ville / CP</label>
+      <input class="input" id="searchPlace" placeholder="Ex : Goussainville, Villepinte, 95380..." value="Louvres">
+    </div>
+    <div class="field">
+      <label>Rayon</label>
+      <select class="select" id="radiusKm">
+        <option value="10">10 km</option>
+        <option value="20" selected>20 km</option>
+        <option value="30">30 km</option>
+        <option value="50">50 km</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Carburant</label>
+      <select class="select" id="fuelType">
+        <option value="gazole" selected>Gazole</option>
+        <option value="sp95">SP95</option>
+        <option value="sp98">SP98</option>
+        <option value="e10">E10</option>
+        <option value="e85">E85</option>
+        <option value="gplc">GPLc</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Enseigne</label>
+      <select class="select" id="brandFilter">
+        <option value="ALL" selected>Toutes</option>
+        <option value="TOTAL">TotalEnergies</option>
+        <option value="ESSO">ESSO</option>
+        <option value="ESSO_EXPRESS">ESSO Express</option>
+        <option value="OTHER">Autres</option>
+      </select>
+    </div>
+    <button class="btn-primary" id="btnSearch">Rechercher</button>
+  </section>
+
+  <section class="stats">
+    <div class="stat"><div class="stat-label">Stations</div><div class="stat-value" id="statCount">—</div><div class="stat-sub">avec prix gazole</div></div>
+    <div class="stat"><div class="stat-label">Prix mini</div><div class="stat-value" id="statMin">—</div><div class="stat-sub">€/L sur la zone</div></div>
+    <div class="stat"><div class="stat-label">Moyenne zone</div><div class="stat-value" id="statAvg">—</div><div class="stat-sub">toutes enseignes</div></div>
+    <div class="stat"><div class="stat-label">Moyenne Total</div><div class="stat-value" id="statTotal">—</div><div class="stat-sub">si enseigne détectée</div></div>
+    <div class="stat"><div class="stat-label">Moyenne ESSO</div><div class="stat-value" id="statEsso">—</div><div class="stat-sub">si enseigne détectée</div></div>
+  </section>
+
+  <section class="layout">
+    <div class="map-card">
+      <div class="map-top">
+        <button class="map-tool" id="toolFit">Voir toutes les stations</button>
+        <button class="map-tool" id="toolTotal">TotalEnergies</button>
+        <button class="map-tool" id="toolEsso">ESSO</button>
+        <button class="map-tool" id="toolEssoExpress">ESSO Express</button>
+        <button class="map-tool" id="toolAll">Toutes</button>
+      </div>
+      <div id="map"></div>
+    </div>
+    <aside class="list-card">
+      <div class="list-head"><div class="list-title">Stations trouvées</div><span class="pill">Officiel + OSM</span></div>
+      <div class="list-body" id="stationsList"><div class="empty">Recherche en cours...</div></div>
+    </aside>
+  </section>
+</main>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+<script src="api.js"></script>
+<script src="stations.js"></script>
+</body>
+</html>

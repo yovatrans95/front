@@ -1,0 +1,326 @@
+/* ══════════════════════════════════════════════════════════════════════════
+   PANNEAU IMPORT PDF MAUFFREY
+══════════════════════════════════════════════════════════════════════════ */
+
+.import-panel {
+  position: fixed;
+  top: 0;
+  right: -380px;
+  width: 360px;
+  height: 100vh;
+  background: var(--surface);
+  border-left: 1px solid var(--border);
+  box-shadow: -4px 0 24px rgba(0,0,0,.12);
+  z-index: 500;
+  display: flex;
+  flex-direction: column;
+  transition: right .25s ease;
+  font-family: 'DM Sans', sans-serif;
+}
+.import-panel.open { right: 0; }
+
+.page-wrapper.with-import-panel {
+  margin-right: 360px;
+  transition: margin-right .25s ease;
+}
+
+/* ── Header ──────────────────────────────────────────────────────────── */
+.import-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(135deg, #1e3a8a 0%, #3a5ce4 100%);
+  color: #fff;
+  flex-shrink: 0;
+}
+.import-panel-title {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: -.2px;
+}
+.import-panel-close {
+  background: rgba(255,255,255,.15);
+  border: none;
+  color: #fff;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s;
+}
+.import-panel-close:hover { background: rgba(255,255,255,.3); }
+
+/* ── Corps ───────────────────────────────────────────────────────────── */
+.import-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* ── Zone drop PDF ───────────────────────────────────────────────────── */
+.import-drop-zone {
+  border: 2px dashed var(--border);
+  border-radius: 10px;
+  padding: 20px 12px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color .15s, background .15s;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.import-drop-zone:hover,
+.import-drop-zone.active {
+  border-color: var(--primary);
+  background: #eff6ff;
+  color: var(--primary);
+}
+.import-drop-zone svg { margin-bottom: 6px; opacity: .6; display: block; margin: 0 auto 8px; }
+.import-drop-zone p { font-size: 12px; line-height: 1.5; margin: 0; }
+
+/* ── Statut ──────────────────────────────────────────────────────────── */
+.import-status {
+  font-size: 12px;
+  color: var(--text-muted);
+  font-style: italic;
+  min-height: 16px;
+}
+
+/* ── Section par tracteur ────────────────────────────────────────────── */
+.import-section {
+  background: var(--bg);
+  border: 1px solid var(--border-light);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.import-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  background: #f0f4ff;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.import-tracteur {
+  font-size: 13px;
+  font-weight: 700;
+  color: #1e3a8a;
+  font-family: 'DM Mono', monospace;
+}
+
+.import-date {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.import-count {
+  font-size: 11px;
+  color: var(--text-subtle);
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 1px 8px;
+}
+
+/* ── Carte de tournée importée ───────────────────────────────────────── */
+.import-tour-card {
+  margin: 6px;
+  background: white;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--primary);
+  border-radius: 7px;
+  padding: 8px 10px;
+  cursor: grab;
+  transition: box-shadow .15s, opacity .15s, transform .1s;
+  font-size: 12px;
+}
+.import-tour-card:hover {
+  box-shadow: 0 2px 8px rgba(37,99,235,.15);
+  transform: translateY(-1px);
+}
+.import-tour-card.dragging {
+  opacity: .4;
+  cursor: grabbing;
+}
+.import-tour-card.dispatched {
+  opacity: .4;
+  cursor: not-allowed;
+  border-left-color: var(--effectue-txt);
+  background: var(--effectue-bg);
+  text-decoration: line-through;
+}
+
+.itc-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+  gap: 6px;
+}
+
+.itc-marchandise {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  color: var(--text-muted);
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.itc-tracteur {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  font-weight: 600;
+  color: #1e3a8a;
+  background: #eff3ff;
+  border: 1px solid #c7d2fe;
+  border-radius: 4px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+}
+
+.itc-lieu {
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 2px 0;
+}
+
+.itc-dest {
+  color: var(--text-muted);
+  padding-left: 10px;
+  border-left: 2px solid var(--border-light);
+  margin-left: 2px;
+}
+
+.itc-ref {
+  font-family: 'DM Mono', monospace;
+  font-size: 10px;
+  color: var(--text-subtle);
+  margin-top: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border-light);
+}
+
+.itc-drag-hint {
+  font-size: 10px;
+  color: var(--primary);
+  opacity: .6;
+  margin-top: 5px;
+  font-style: italic;
+}
+
+/* ── Bouton toggle dans le header ────────────────────────────────────── */
+.import-toggle-btn {
+  width: auto !important;
+  padding: 0 12px !important;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: all .15s;
+}
+.import-toggle-btn:hover,
+.import-toggle-btn.active {
+  background: #eff6ff;
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.import-toggle-btn svg { width: 14px; height: 14px; }
+
+/* ── Drop target depuis import ───────────────────────────────────────── */
+.day-cell.drop-import {
+  background: #eff6ff !important;
+  outline: 2px dashed #3a5ce4;
+  outline-offset: -3px;
+}
+
+/* ── Titre carte : "Tour · FMA1" ─────────────────────────────────────────── */
+.itc-type-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -.1px;
+}
+
+.itc-marchandise-line {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: .4px;
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Badge période (Jour / Nuit) ─────────────────────────────────────── */
+.import-periode-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 10px;
+  letter-spacing: .2px;
+  white-space: nowrap;
+}
+.import-periode-badge.is-jour {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+.import-periode-badge.is-nuit {
+  background: #312e81;
+  color: #e0e7ff;
+  border: 1px solid #4338ca;
+}
+
+/* Header de section coloré selon Jour/Nuit */
+.import-section-header.is-jour { background: #fffbeb; }
+.import-section-header.is-nuit { background: #eef2ff; }
+
+/* Bordure gauche colorée selon Jour/Nuit sur chaque carte */
+.import-tour-card.is-jour { border-left-color: #f59e0b; }
+.import-tour-card.is-nuit { border-left-color: #4338ca; }
+
+/* Mini-badge "JOUR" / "NUIT" en haut à droite de chaque carte */
+.itc-periode-mini {
+  font-family: 'DM Mono', monospace;
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 4px;
+  letter-spacing: .3px;
+  flex-shrink: 0;
+}
+.itc-periode-mini.is-jour {
+  background: #fef3c7;
+  color: #92400e;
+  border: 1px solid #fde68a;
+}
+.itc-periode-mini.is-nuit {
+  background: #312e81;
+  color: #e0e7ff;
+  border: 1px solid #4338ca;
+}

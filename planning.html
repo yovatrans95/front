@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Planning · Yovatrans</title>
+  <link rel="stylesheet" href="planning.css" />
+  <link rel="stylesheet" href="planning-import.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+<div id="sidebar-container"></div>
+
+<div class="page-wrapper">
+
+  <header class="planning-header">
+    <div class="header-left">
+      <h1 class="page-title">Planning</h1>
+      <div class="nav-week">
+        <button class="nav-btn" id="btnPrev">&#8249;</button>
+        <span class="week-label" id="weekLabel"></span>
+        <button class="nav-btn" id="btnNext">&#8250;</button>
+        <button class="nav-btn today-btn" id="btnToday">Aujourd'hui</button>
+      </div>
+      <div class="view-range-btns">
+        <button class="view-range-btn" data-days="1">1j</button>
+        <button class="view-range-btn" data-days="2">2j</button>
+        <button class="view-range-btn" data-days="3">3j</button>
+        <button class="view-range-btn" data-days="4">4j</button>
+        <button class="view-range-btn" data-days="5">5j</button>
+        <button class="view-range-btn active" data-days="7">7j</button>
+      </div>
+    </div>
+
+    <div class="header-center">
+      <div class="search-bar">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input type="text" id="searchInput" placeholder="Chercher chauffeur, client, immat…" />
+      </div>
+    </div>
+
+    <div class="header-right">
+
+      <!-- Bouton Import PDF -->
+      <button id="importPanelToggle" class="nav-btn import-toggle-btn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+          <line x1="12" y1="12" x2="12" y2="18"/>
+          <line x1="9" y1="15" x2="15" y2="15"/>
+        </svg>
+        Import PDF
+      </button>
+
+      <div class="filters">
+        <select id="filterStatut" class="filter-select">
+          <option value="">Tous les statuts</option>
+          <option value="planifie">Planifié</option>
+          <option value="annule">Annulé</option>
+          <option value="chute">Chute</option>
+          <option value="debord">Débord</option>
+          <option value="passage_vide">Passage à vide</option>
+          <option value="effectue">Effectué</option>
+        </select>
+        <select id="filterType" class="filter-select">
+          <option value="">Tour & Régie</option>
+          <option value="tour">Tour</option>
+          <option value="regie">Régie</option>
+        </select>
+        <select id="filterClient" class="filter-select">
+          <option value="">Tous les clients</option>
+        </select>
+      </div>
+      <div class="edit-toggle">
+        <span class="toggle-label">Visualisation</span>
+        <label class="switch">
+          <input type="checkbox" id="editToggle" />
+          <span class="slider"></span>
+        </label>
+        <span class="toggle-label">Édition</span>
+      </div>
+    </div>
+  </header>
+
+  <div class="legend">
+    <span class="legend-item planifie">Planifié</span>
+    <span class="legend-item annule">Annulé</span>
+    <span class="legend-item chute">Chute</span>
+    <span class="legend-item debord">Débord</span>
+    <span class="legend-item passage_vide">Passage à vide</span>
+    <span class="legend-item effectue">Effectué</span>
+    <span class="legend-item tour-badge">Tour</span>
+    <span class="legend-item regie-badge">Régie</span>
+  </div>
+
+  <div class="planning-scroll-container">
+    <div class="planning-grid" id="planningGrid"></div>
+  </div>
+</div>
+
+<!-- ── MODAL ──────────────────────────────────────────────────────────────── -->
+<div class="modal-overlay" id="tourModal" style="display:none;">
+  <div class="modal">
+    <div class="modal-header">
+      <h2 class="modal-title" id="modalTitle">Nouveau tour</h2>
+      <button class="modal-close" id="modalClose">&times;</button>
+    </div>
+    <div class="modal-body">
+
+      <!-- Type + Statut (statut visible uniquement en édition) -->
+      <div class="form-row">
+        <div class="form-group">
+          <label>Type</label>
+          <div class="radio-group">
+            <label class="radio-label"><input type="radio" name="tourType" value="tour" checked /> Tour</label>
+            <label class="radio-label"><input type="radio" name="tourType" value="regie" /> Régie</label>
+          </div>
+        </div>
+        <div class="form-group" id="statutBlock" style="display:none;">
+          <label>Statut</label>
+          <select id="fStatut" class="statut-select">
+            <option value="planifie">Planifié</option>
+            <option value="annule">Annulé</option>
+            <option value="chute">Chute</option>
+            <option value="debord">Débord</option>
+            <option value="passage_vide">Passage à vide</option>
+            <option value="effectue">Effectué</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Période -->
+      <div class="form-row">
+        <div class="form-group">
+          <label>Période</label>
+          <div class="radio-group">
+            <label class="radio-label">
+              <input type="radio" name="heurePeriode" id="periodeJournee" value="journee" checked />
+              Journée
+            </label>
+            <label class="radio-label">
+              <input type="radio" name="heurePeriode" id="periodeNuit" value="nuit" />
+              Nuit
+            </label>
+          </div>
+          <!-- champ hidden pour lire la valeur facilement -->
+          <input type="hidden" id="fPeriode" value="journee" />
+        </div>
+      </div>
+
+      <!-- Client -->
+      <div class="form-row">
+        <div class="form-group">
+          <label>Client</label>
+          <input type="text" id="fClient" placeholder="Nom du client" list="clientSuggestions" autocomplete="off" />
+          <datalist id="clientSuggestions"></datalist>
+        </div>
+        <div class="form-group">
+          <label>Immatriculation camion</label>
+          <input type="text" id="fImmat" placeholder="AB-123-CD" list="immatSuggestions" autocomplete="off" />
+          <datalist id="immatSuggestions"></datalist>
+        </div>
+      </div>
+
+      <!-- Lieux Tour (source + destination) -->
+      <div id="fieldsLieux">
+        <div class="form-row">
+          <div class="form-group">
+            <label>Source (chargement)</label>
+            <input type="text" id="fSource" placeholder="Lieu de chargement" />
+          </div>
+          <div class="form-group">
+            <label>Destination (déchargement)</label>
+            <input type="text" id="fDestination" placeholder="Lieu de déchargement" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Lieu Régie (un seul champ) -->
+      <div id="fieldChantier" style="display:none;">
+        <div class="form-row">
+          <div class="form-group full-width">
+            <label>Lieu de chantier</label>
+            <input type="text" id="fChantier" placeholder="Adresse ou nom du chantier" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Référence Dashdoc -->
+      <div class="form-row">
+        <div class="form-group full-width">
+          <label>Référence transport (Dashdoc)</label>
+          <input type="text" id="fRefTransport" placeholder="ex: TRP-2024-00123" />
+        </div>
+      </div>
+
+      <!-- Notes -->
+      <div class="form-row">
+        <div class="form-group full-width">
+          <label>Notes</label>
+          <textarea id="fNotes" rows="2" placeholder="Informations complémentaires…"></textarea>
+        </div>
+      </div>
+
+      <div class="modal-meta" id="modalMeta" style="display:none;">
+        <small id="modalMetaText"></small>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-ghost"   id="modalCancel">Annuler</button>
+      <button class="btn btn-danger"  id="modalDelete" style="display:none;">Supprimer</button>
+      <button class="btn btn-primary" id="modalSave">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<div class="loader-overlay" id="loaderOverlay" style="display:none;">
+  <div class="spinner"></div>
+</div>
+
+<!-- PDF.js pour extraction texte PDF -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script>pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";</script>
+<script src="sidebar.js"></script>
+<script src="api.js"></script>
+<script src="planning.js"></script>
+<script src="planning-import.js"></script>
+<script>
+  // Sync radio heurePeriode -> hidden input fPeriode
+  document.querySelectorAll('input[name="heurePeriode"]').forEach(r => {
+    r.addEventListener('change', () => {
+      document.getElementById('fPeriode').value = r.value;
+    });
+  });
+  // Sync openModal -> radios heurePeriode
+  const _origOpen = window.openModal;
+</script>
+</body>
+</html>

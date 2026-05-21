@@ -121,18 +121,81 @@ async function reorderTour(chauffeurId, date, fromIdx, toIdx) {
   // Mise à jour locale immédiate pour fluidité
   planning.tours = tours;
   renderGrid();
-  // Sync backend : PATCH ordre (le backend doit supporter un champ "ordre" ou on recrée)
-  // Approche simple : on envoie un PATCH avec le champ ordre sur chaque tour modifié
-  // Si votre backend ne supporte pas encore l'ordre, cette ligne est un no-op silencieux
+
+  // Sauvegarde côté backend (route dédiée /reorder qui réordonne le tableau)
   try {
     await planningFetch(`/planning/${chauffeurId}/${date}/reorder`, {
       method: 'PATCH',
       body: JSON.stringify({ ordre: tours.map(t => t._id) })
     });
   } catch(e) {
-    // Silencieux si la route n'existe pas encore — l'ordre est quand même en mémoire
-    console.warn('Route /reorder non disponible, ordre local uniquement :', e.message);
+    notify('Erreur sauvegarde de l\'ordre : ' + e.message, 'error');
+    await loadView(); // resync depuis le backend pour revenir à un état cohérent
   }
+}
+
+// ─── Auto-scroll pendant le drag ──────────────────────────────────────────────
+// Quand on drag près d'un bord de l'écran, on scrolle automatiquement le
+// conteneur du planning (ou la fenêtre) pour permettre de déposer dans une
+// zone hors écran. Plus on s'approche du bord, plus c'est rapide.
+let _autoScrollAnimId = null;
+let _autoScrollSpeed  = { x: 0, y: 0 };
+const AUTO_SCROLL_EDGE = 90;   // px depuis le bord pour déclencher
+const AUTO_SCROLL_MAX  = 18;   // vitesse max par frame (px)
+
+function _autoScrollDragOverHandler(e) {
+  const x = e.clientX, y = e.clientY;
+  // Pendant un drag, des événements arrivent parfois avec clientX/Y = 0 — ignorés
+  if (x === 0 && y === 0) { _autoScrollSpeed = { x: 0, y: 0 }; return; }
+  const w = window.innerWidth, h = window.innerHeight;
+
+  let sy = 0, sx = 0;
+  if (y < AUTO_SCROLL_EDGE) {
+    sy = -Math.ceil(((AUTO_SCROLL_EDGE - y) / AUTO_SCROLL_EDGE) * AUTO_SCROLL_MAX);
+  } else if (y > h - AUTO_SCROLL_EDGE) {
+    sy = Math.ceil(((y - (h - AUTO_SCROLL_EDGE)) / AUTO_SCROLL_EDGE) * AUTO_SCROLL_MAX);
+  }
+  if (x < AUTO_SCROLL_EDGE) {
+    sx = -Math.ceil(((AUTO_SCROLL_EDGE - x) / AUTO_SCROLL_EDGE) * AUTO_SCROLL_MAX);
+  } else if (x > w - AUTO_SCROLL_EDGE) {
+    sx = Math.ceil(((x - (w - AUTO_SCROLL_EDGE)) / AUTO_SCROLL_EDGE) * AUTO_SCROLL_MAX);
+  }
+  _autoScrollSpeed = { x: sx, y: sy };
+}
+
+function startDragAutoScroll() {
+  _autoScrollSpeed = { x: 0, y: 0 };
+  document.addEventListener('dragover', _autoScrollDragOverHandler, true);
+  if (_autoScrollAnimId) return;
+
+  const container = document.querySelector('.planning-scroll-container');
+  const tick = () => {
+    const { x, y } = _autoScrollSpeed;
+    if (x !== 0 || y !== 0) {
+      let scrolledContainer = false;
+      if (container) {
+        const beforeL = container.scrollLeft, beforeT = container.scrollTop;
+        container.scrollLeft += x;
+        container.scrollTop  += y;
+        if (container.scrollLeft !== beforeL || container.scrollTop !== beforeT) {
+          scrolledContainer = true;
+        }
+      }
+      // Si le conteneur n'a plus de marge à scroller, on tente la fenêtre
+      if (!scrolledContainer) window.scrollBy(x, y);
+    }
+    _autoScrollAnimId = requestAnimationFrame(tick);
+  };
+  _autoScrollAnimId = requestAnimationFrame(tick);
+}
+
+function stopDragAutoScroll() {
+  document.removeEventListener('dragover', _autoScrollDragOverHandler, true);
+  if (_autoScrollAnimId) {
+    cancelAnimationFrame(_autoScrollAnimId);
+    _autoScrollAnimId = null;
+  }
+  _autoScrollSpeed = { x: 0, y: 0 };
 }
 
 // ─── Loader ───────────────────────────────────────────────────────────────────
@@ -265,6 +328,356 @@ function updateModalFields() {
   const type = document.querySelector('input[name="tourType"]:checked')?.value;
   document.getElementById('fieldsLieux').style.display = type === 'tour' ? '' : 'none';
   document.getElementById('fieldChantier').style.display = type === 'regie' ? '' : 'none';
+}
+
+// ─── Affectation camion à toute la journée ───────────────────────────────────
+// Retourne une Map : immat -> { chauffeurName, periode } des camions utilisés
+// par d'autres chauffeurs ce jour-là.
+// On considère un camion "occupé" pour (chauffeurId, dateISO, periode) si un AUTRE
+// chauffeur l'utilise sur la même date et la même période (jour/nuit).
+// Si periode === null on considère toutes les périodes confondues.
+function getOccupiedVehiclesForDate(dateISO, excludeChauffeurId, periode) {
+  const occupied = new Map();
+  state.plannings.forEach(p => {
+    if (p.date !== dateISO) return;
+    const chId = String(p.chauffeurId?._id || p.chauffeurId);
+    if (chId === String(excludeChauffeurId)) return;
+    const ch = state.chauffeurs.find(c => String(c._id) === chId);
+    const chauffeurName = ch ? `${ch.prenom} ${ch.nom}` : '—';
+    p.tours.forEach(t => {
+      if (!t.immatCamion) return;
+      if (periode && t.heurePeriode && t.heurePeriode !== periode) return;
+      // Premier conflit gagne (un camion n'a qu'un occupant à signaler)
+      if (!occupied.has(t.immatCamion)) {
+        occupied.set(t.immatCamion, { chauffeurName, periode: t.heurePeriode || 'journee' });
+      }
+    });
+  });
+  return occupied;
+}
+
+// Période "dominante" des tours du jour : si tous nuit -> 'nuit', sinon 'journee'
+function getDominantPeriode(tours) {
+  if (!tours.length) return 'journee';
+  const allNight = tours.every(t => t.heurePeriode === 'nuit');
+  return allNight ? 'nuit' : 'journee';
+}
+
+// ── Helper partagé : construit la liste libre/occupé dans un conteneur ─────
+// ctx = { dateISO, excludeChauffeurId, periode, currentImmat }
+// onSelect(immat) : callback appelé au clic d'un camion libre
+function _buildVehicleList(listEl, ctx, onSelect) {
+  listEl.innerHTML = '';
+  const occupied = getOccupiedVehiclesForDate(ctx.dateISO, ctx.excludeChauffeurId, ctx.periode);
+
+  const sorted = [...state.vehicules]
+    .filter(v => v.immatriculation)
+    .sort((a, b) => {
+      const aOcc = occupied.has(a.immatriculation);
+      const bOcc = occupied.has(b.immatriculation);
+      if (aOcc !== bOcc) return aOcc ? 1 : -1;
+      return a.immatriculation.localeCompare(b.immatriculation);
+    });
+
+  if (sorted.length === 0) {
+    listEl.innerHTML = '<div class="atp-empty">Aucun véhicule enregistré.</div>';
+    return;
+  }
+
+  let freeShown = false, occupiedShown = false;
+  sorted.forEach(v => {
+    const immat = v.immatriculation;
+    const isOccupied = occupied.has(immat);
+    const isCurrent = ctx.currentImmat && immat === ctx.currentImmat;
+
+    if (!isOccupied && !freeShown) {
+      const h = document.createElement('div');
+      h.className = 'atp-section-label';
+      h.textContent = 'Disponibles';
+      listEl.appendChild(h);
+      freeShown = true;
+    }
+    if (isOccupied && !occupiedShown) {
+      const h = document.createElement('div');
+      h.className = 'atp-section-label atp-section-label-muted';
+      h.textContent = 'Déjà affectés à un autre chauffeur';
+      listEl.appendChild(h);
+      occupiedShown = true;
+    }
+
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'atp-item'
+      + (isOccupied ? ' is-occupied' : '')
+      + (isCurrent ? ' is-current' : '');
+    const subLabel = [v.marque, v.modele].filter(Boolean).join(' ');
+    const occInfo = isOccupied
+      ? `<span class="atp-item-occ">→ ${occupied.get(immat).chauffeurName} (${occupied.get(immat).periode === 'nuit' ? 'nuit' : 'jour'})</span>`
+      : '';
+    item.innerHTML = `
+      <span class="atp-item-immat">${immat}</span>
+      ${subLabel ? `<span class="atp-item-sub">${subLabel}</span>` : ''}
+      ${occInfo}
+    `;
+    // Tous les camions sont sélectionnables, même ceux déjà affectés à un autre chauffeur
+    item.addEventListener('click', e => {
+      e.stopPropagation();
+      onSelect(immat);
+    });
+    listEl.appendChild(item);
+  });
+}
+
+async function assignVehicleToDay(chauffeurId, dateISO, immat) {
+  const planning = getPlanningForCell(chauffeurId, dateISO);
+  if (!planning || !planning.tours.length) {
+    notify('Aucune tournée à modifier sur cette journée.', 'warning');
+    return;
+  }
+  // Tours à mettre à jour (on ne touche pas ceux qui ont déjà la bonne immat)
+  const toUpdate = planning.tours.filter(t => t.immatCamion !== immat);
+  if (!toUpdate.length) {
+    notify('Toutes les tournées utilisent déjà ce camion.', 'info');
+    return;
+  }
+  // Confirmation si écrasement d'immats différentes
+  const willOverwrite = toUpdate.filter(t => t.immatCamion && t.immatCamion !== immat);
+  if (willOverwrite.length > 0) {
+    const ok = await confirmDialog(
+      `${willOverwrite.length} tournée(s) ont déjà un camion différent. Les remplacer par ${immat} ?`,
+      { title: 'Remplacer le camion ?', okLabel: 'Remplacer', danger: false }
+    );
+    if (!ok) return;
+  }
+
+  showLoader();
+  try {
+    await Promise.all(
+      toUpdate.map(t => updateTour(chauffeurId, dateISO, t._id, { ...t, immatCamion: immat }))
+    );
+    notify(`Camion ${immat} appliqué à ${toUpdate.length} tournée(s).`, 'success');
+    await loadView();
+  } catch (e) {
+    notify('Erreur affectation : ' + e.message, 'error');
+  } finally {
+    hideLoader();
+  }
+}
+
+// ── Popover "Affecter un camion à la journée" (depuis la cellule) ──────────
+let _openAssignPopover = null;
+function closeAssignVehiclePopover() {
+  if (_openAssignPopover) {
+    _openAssignPopover.remove();
+    _openAssignPopover = null;
+    document.removeEventListener('click', _outsideAssignClick, true);
+    document.removeEventListener('keydown', _escAssignClick, true);
+  }
+}
+function _outsideAssignClick(e) {
+  if (_openAssignPopover && !_openAssignPopover.contains(e.target)) {
+    closeAssignVehiclePopover();
+  }
+}
+function _escAssignClick(e) {
+  if (e.key === 'Escape') closeAssignVehiclePopover();
+}
+
+function openAssignVehiclePopover(anchorBtn, chauffeurId, dateISO) {
+  closeAssignVehiclePopover();
+  closeImmatPicker();
+
+  const planning = getPlanningForCell(chauffeurId, dateISO);
+  const tours = planning?.tours || [];
+  if (!tours.length) {
+    notify('Ajoute au moins une tournée avant d\'affecter un camion.', 'warning');
+    return;
+  }
+  const periode = getDominantPeriode(tours);
+
+  const pop = document.createElement('div');
+  pop.className = 'assign-truck-popover';
+  pop.innerHTML = `
+    <div class="atp-header">
+      <span class="atp-title">Affecter un camion à la journée</span>
+      <button type="button" class="atp-close" aria-label="Fermer">&times;</button>
+    </div>
+    <div class="atp-sub">${tours.length} tournée(s) · période ${periode === 'nuit' ? 'NUIT' : 'JOUR'}</div>
+    <div class="atp-list"></div>
+  `;
+
+  _buildVehicleList(
+    pop.querySelector('.atp-list'),
+    { dateISO, excludeChauffeurId: chauffeurId, periode, currentImmat: null },
+    async (immat) => {
+      closeAssignVehiclePopover();
+      await assignVehicleToDay(chauffeurId, dateISO, immat);
+    }
+  );
+
+  pop.querySelector('.atp-close').addEventListener('click', closeAssignVehiclePopover);
+  pop.addEventListener('click', e => e.stopPropagation());
+
+  document.body.appendChild(pop);
+  const rect = anchorBtn.getBoundingClientRect();
+  const popW = pop.offsetWidth;
+  const popH = pop.offsetHeight;
+  let left = rect.left + window.scrollX;
+  let top  = rect.bottom + window.scrollY + 6;
+  if (left + popW > window.innerWidth - 8) left = window.innerWidth - popW - 8;
+  if (rect.bottom + popH + 6 > window.innerHeight) {
+    top = rect.top + window.scrollY - popH - 6;
+  }
+  pop.style.left = `${Math.max(8, left)}px`;
+  pop.style.top  = `${Math.max(8, top)}px`;
+
+  _openAssignPopover = pop;
+  setTimeout(() => {
+    document.addEventListener('click', _outsideAssignClick, true);
+    document.addEventListener('keydown', _escAssignClick, true);
+  }, 0);
+}
+
+// ── Picker d'immat dans le modal (création/édition d'un tour) ──────────────
+let _openImmatPicker = null;
+function closeImmatPicker() {
+  if (_openImmatPicker) {
+    _openImmatPicker.remove();
+    _openImmatPicker = null;
+    document.removeEventListener('click', _outsideImmatClick, true);
+    document.removeEventListener('keydown', _escImmatClick, true);
+  }
+}
+function _outsideImmatClick(e) {
+  if (_openImmatPicker && !_openImmatPicker.contains(e.target)) {
+    // Ne pas fermer si on clique sur le trigger ou l'input lui-même
+    const trigger = document.getElementById('fImmatPickerBtn');
+    const input   = document.getElementById('fImmat');
+    if (trigger && trigger.contains(e.target)) return;
+    if (input && input === e.target) return;
+    closeImmatPicker();
+  }
+}
+function _escImmatClick(e) {
+  if (e.key === 'Escape') closeImmatPicker();
+}
+
+function refreshImmatPickerIfOpen() {
+  if (!_openImmatPicker) return;
+  const dateISO = state.currentDate;
+  const chauffeurId = state.currentChauffeurId;
+  const periode = document.getElementById('fPeriode').value || 'journee';
+  const currentImmat = (document.getElementById('fImmat').value || '').trim();
+  const listEl = _openImmatPicker.querySelector('.atp-list');
+  const subEl  = _openImmatPicker.querySelector('.atp-sub');
+  if (subEl) subEl.textContent = `Période ${periode === 'nuit' ? 'NUIT' : 'JOUR'}`;
+  _buildVehicleList(
+    listEl,
+    { dateISO, excludeChauffeurId: chauffeurId, periode, currentImmat },
+    (immat) => {
+      document.getElementById('fImmat').value = immat;
+      closeImmatPicker();
+    }
+  );
+}
+
+function openImmatPicker(anchorEl) {
+  closeImmatPicker();
+  closeAssignVehiclePopover();
+
+  const dateISO = state.currentDate;
+  const chauffeurId = state.currentChauffeurId;
+  if (!dateISO || !chauffeurId) return;
+  const periode = document.getElementById('fPeriode').value || 'journee';
+  const currentImmat = (document.getElementById('fImmat').value || '').trim();
+
+  const pop = document.createElement('div');
+  pop.className = 'assign-truck-popover immat-picker-popover';
+  pop.innerHTML = `
+    <div class="atp-header">
+      <span class="atp-title">Choisir un camion</span>
+      <button type="button" class="atp-close" aria-label="Fermer">&times;</button>
+    </div>
+    <div class="atp-sub">Période ${periode === 'nuit' ? 'NUIT' : 'JOUR'}</div>
+    <div class="atp-list"></div>
+  `;
+
+  _buildVehicleList(
+    pop.querySelector('.atp-list'),
+    { dateISO, excludeChauffeurId: chauffeurId, periode, currentImmat },
+    (immat) => {
+      document.getElementById('fImmat').value = immat;
+      closeImmatPicker();
+    }
+  );
+
+  pop.querySelector('.atp-close').addEventListener('click', closeImmatPicker);
+  pop.addEventListener('click', e => e.stopPropagation());
+
+  document.body.appendChild(pop);
+  const rect = anchorEl.getBoundingClientRect();
+  // largeur min = celle de l'input
+  const inputEl = document.getElementById('fImmat');
+  if (inputEl) {
+    const minW = inputEl.getBoundingClientRect().width;
+    if (minW > 280) pop.style.width = `${Math.min(minW, 360)}px`;
+  }
+  const popW = pop.offsetWidth;
+  const popH = pop.offsetHeight;
+  let left = rect.left + window.scrollX;
+  let top  = rect.bottom + window.scrollY + 4;
+  if (left + popW > window.innerWidth - 8) left = window.innerWidth - popW - 8;
+  if (rect.bottom + popH + 4 > window.innerHeight) {
+    top = rect.top + window.scrollY - popH - 4;
+  }
+  pop.style.left = `${Math.max(8, left)}px`;
+  pop.style.top  = `${Math.max(8, top)}px`;
+
+  _openImmatPicker = pop;
+  setTimeout(() => {
+    document.addEventListener('click', _outsideImmatClick, true);
+    document.addEventListener('keydown', _escImmatClick, true);
+  }, 0);
+}
+
+// Greffe (une seule fois) le bouton chevron à droite de #fImmat
+function ensureImmatPickerButton() {
+  const input = document.getElementById('fImmat');
+  if (!input) return;
+
+  // On désactive le datalist natif (il chevauche la popover et n'a pas l'info "déjà affecté")
+  if (input.hasAttribute('list')) input.removeAttribute('list');
+  input.setAttribute('autocomplete', 'off');
+
+  if (document.getElementById('fImmatPickerBtn')) return; // déjà greffé
+
+  // Wrapper combobox autour de l'input
+  const wrapper = document.createElement('div');
+  wrapper.className = 'immat-combobox';
+  input.parentNode.insertBefore(wrapper, input);
+  wrapper.appendChild(input);
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.id = 'fImmatPickerBtn';
+  btn.className = 'immat-combobox-trigger';
+  btn.title = 'Voir les camions disponibles';
+  btn.setAttribute('aria-label', 'Ouvrir la liste des camions');
+  btn.innerHTML = `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M10 17h4V5H2v12h3"/>
+      <path d="M20 17h2v-3.34a4 4 0 0 0-1.17-2.83L19 9h-5"/>
+      <path d="M14 17h1"/>
+      <circle cx="7.5" cy="17.5" r="2.5"/>
+      <circle cx="17.5" cy="17.5" r="2.5"/>
+    </svg>
+  `;
+  btn.addEventListener('click', e => {
+    e.stopPropagation();
+    if (_openImmatPicker) closeImmatPicker();
+    else openImmatPicker(wrapper);
+  });
+  wrapper.appendChild(btn);
 }
 
 // ─── Grille ───────────────────────────────────────────────────────────────────
@@ -495,12 +908,35 @@ function renderGrid() {
       list.className = 'tour-list';
       tours.forEach((tour, idx) => list.appendChild(renderTourCard(tour, chId, dateISO, idx, tours.length)));
 
+      // Bouton "Affecter camion à la journée" — visible en mode édition si ≥1 tournée
+      let assignBtn = null;
+      if (tours.length > 0) {
+        assignBtn = document.createElement('button');
+        assignBtn.className = 'assign-truck-btn';
+        assignBtn.title = 'Affecter un camion à toutes les tournées du jour';
+        assignBtn.innerHTML = `
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M10 17h4V5H2v12h3"/>
+            <path d="M20 17h2v-3.34a4 4 0 0 0-1.17-2.83L19 9h-5"/>
+            <path d="M14 17h1"/>
+            <circle cx="7.5" cy="17.5" r="2.5"/>
+            <circle cx="17.5" cy="17.5" r="2.5"/>
+          </svg>
+          <span>Affecter camion</span>
+        `;
+        assignBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          openAssignVehiclePopover(assignBtn, chId, dateISO);
+        });
+      }
+
       const addBtn = document.createElement('button');
       addBtn.className = 'add-tour-btn';
       addBtn.textContent = '+ Ajouter';
       addBtn.addEventListener('click', () => openModal('create', chId, dateISO, null));
 
       cell.appendChild(list);
+      if (assignBtn) cell.appendChild(assignBtn);
       cell.appendChild(addBtn);
       if (!rowVisible) cell.style.display = 'none';
       grid.appendChild(cell);
@@ -603,11 +1039,13 @@ function openModal(mode, chauffeurId, dateISO, tour) {
   }
 
   updateModalFields();
+  ensureImmatPickerButton();
   setTimeout(() => document.getElementById('fClient')?.focus(), 80);
   document.getElementById('tourModal').style.display = 'flex';
 }
 
 function closeModal() {
+  closeImmatPicker();
   document.getElementById('tourModal').style.display = 'none';
 }
 
@@ -632,7 +1070,6 @@ function getFormData() {
 async function handleSave() {
   const data = getFormData();
   if (!data.client)     { notify('Le client est requis.', 'warning'); return; }
-  if (!data.immatCamion) { notify("L'immatriculation est requise.", 'warning'); return; }
 
   showLoader();
   try {
@@ -750,6 +1187,11 @@ document.addEventListener('DOMContentLoaded', async () => {
     r.addEventListener('change', updateModalFields)
   );
 
+  // Si la popover camion est ouverte et qu'on change la période -> on rafraîchit la liste libre/occupé
+  document.querySelectorAll('input[name="heurePeriode"]').forEach(r =>
+    r.addEventListener('change', refreshImmatPickerIfOpen)
+  );
+
   document.getElementById('modalClose').addEventListener('click', closeModal);
   document.getElementById('modalCancel').addEventListener('click', closeModal);
   document.getElementById('modalSave').addEventListener('click', handleSave);
@@ -757,6 +1199,11 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('tourModal').addEventListener('click', e => {
     if (e.target === document.getElementById('tourModal')) closeModal();
   });
+
+  // Auto-scroll pendant les opérations drag (tournée déplacée près d'un bord d'écran)
+  document.addEventListener('dragstart', startDragAutoScroll, true);
+  document.addEventListener('dragend',   stopDragAutoScroll,  true);
+  document.addEventListener('drop',      stopDragAutoScroll,  true);
 
   init();
 });

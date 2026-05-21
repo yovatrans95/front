@@ -1,0 +1,711 @@
+/**
+ * planning-print.js — Yovatrans Planning
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Génération des feuilles de tournée chauffeur en PDF (1 chauffeur / page).
+ *
+ * Dépendances (à charger AVANT ce script dans planning.html) :
+ *   - jsPDF      : window.jspdf.jsPDF
+ *   - autotable  : enregistré automatiquement sur jsPDF.prototype
+ *
+ * Dépend aussi de planning.js (utilise state, getPlanningForCell, notify, …).
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
+'use strict';
+
+(function () {
+  // ─── Configuration ───────────────────────────────────────────────────────────
+  // Pour afficher ton vrai logo sur chaque feuille, remplis `logoUrl` :
+  //   - soit avec une dataURL base64 :  'data:image/png;base64,iVBORw0KG...'
+  //   - soit avec une URL accessible :  '/img/logo-yovatrans.png' (même origine)
+  // Tant que c'est null, un placeholder neutre est dessiné à la place.
+  const CONFIG = {
+    logoUrl:      "/img/yov.png",
+    logoSize:     28,    // taille du logo en mm (essaie 24 à 36 selon ton image)
+    brandName:    'YOVATRANS',
+    brandTagline: 'Transport & logistique',
+  };
+
+  // ─── Constantes ──────────────────────────────────────────────────────────────
+  const STATUT_LABELS = {
+    planifie:     'Planifié',
+    annule:       'Annulé',
+    chute:        'Chute',
+    debord:       'Débord',
+    passage_vide: 'Passage à vide',
+    effectue:     'Effectué',
+  };
+
+  const DAYS_FULL_FR = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
+
+  // Charge une URL d'image et la renvoie en dataURL base64 (pour jsPDF.addImage)
+  // Renvoie null si l'image n'a pas pu être chargée (image manquante, CORS, etc).
+  function loadImageAsDataURL(url) {
+    return new Promise(resolve => {
+      if (!url) return resolve(null);
+      if (typeof url === 'string' && url.startsWith('data:')) return resolve(url);
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = img.naturalWidth;
+          canvas.height = img.naturalHeight;
+          canvas.getContext('2d').drawImage(img, 0, 0);
+          resolve(canvas.toDataURL('image/png'));
+        } catch (e) { resolve(null); }
+      };
+      img.onerror = () => resolve(null);
+      img.src = url;
+    });
+  }
+
+  // ─── Nettoyage texte (lignes Mauffrey mal extraites + flèches unicode) ──────
+  // L'import PDF Mauffrey produit parfois du texte lettre-par-lettre :
+  //   "R é s i d u  B r o y a g e · V E O L I A"
+  // jsPDF en helvetica (WinAnsi) ne sait pas non plus rendre → (U+2192) etc.
+  // Cette fonction recolle les lettres isolées et normalise les caractères.
+  function cleanText(s) {
+    if (s == null) return '';
+    let t = String(s);
+
+    // Flèches unicode -> »  (WinAnsi compatible)
+    t = t.replace(/[\u2190-\u21FF]/g, '»');
+    // Guillemets courbes -> droits
+    t = t.replace(/[\u2018\u2019\u201A\u201B]/g, "'");
+    t = t.replace(/[\u201C\u201D\u201E\u201F]/g, '"');
+    // Tirets longs -> tiret simple
+    t = t.replace(/[\u2013\u2014]/g, '-');
+
+    // Recoller les lignes "L e t t r e" (ligne par ligne pour préserver les \n)
+    t = t.split('\n').map(fixLineSpacing).join('\n');
+
+    // Espaces multiples -> simple, trim
+    t = t.replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').trim();
+    return t;
+  }
+
+  // Heuristique : si une ligne est majoritairement composée de "mots" d'1 caractère,
+  // on les concatène tous puis on ré-insère des espaces aux frontières détectables :
+  //   - minuscule → majuscule  ("BroyageAutomobile" → "Broyage Automobile")
+  //   - séquence MAJ + MajMin   ("VEOLIAClaye"     → "VEOLIA Claye")
+  //   - chiffre ↔ lettre        ("730Dugny"        → "730 Dugny")
+  //   - autour du · (séparateur Mauffrey)
+  function fixLineSpacing(line) {
+    const tokens = line.split(' ').filter(Boolean);
+    if (tokens.length < 4) return line;
+    const singles = tokens.filter(tk => tk.length === 1).length;
+    // Seuil : >55% des tokens sont des caractères isolés
+    if (singles / tokens.length < 0.55) return line;
+
+    let s = tokens.join('');
+    // Frontières mot probables (min/maj inclut les accents)
+    s = s.replace(/([a-zà-ÿ])([A-ZÀ-Ý])/g, '$1 $2');
+    s = s.replace(/([A-ZÀ-Ý]{2,})([A-ZÀ-Ý][a-zà-ÿ])/g, '$1 $2');
+    s = s.replace(/([a-zA-ZÀ-ÿ])(\d)/g, '$1 $2');
+    s = s.replace(/(\d)([a-zA-ZÀ-ÿ])/g, '$1 $2');
+    // Espace autour des séparateurs / ponctuations collées
+    s = s.replace(/([a-zA-Z0-9À-ÿ])\(/g, '$1 (');
+    s = s.replace(/\)([a-zA-Z0-9À-ÿ])/g, ') $1');
+    s = s.replace(/·/g, ' · ');
+    return s.replace(/\s+/g, ' ').trim();
+  }
+
+  // ─── Helpers ─────────────────────────────────────────────────────────────────
+  function formatDateLongFR(dateISO) {
+    const d = new Date(dateISO + 'T00:00:00');
+    return d.toLocaleDateString('fr-FR', {
+      weekday: 'long', day: '2-digit', month: 'long', year: 'numeric'
+    });
+  }
+
+  function formatDateShortFR(dateISO) {
+    const d = new Date(dateISO + 'T00:00:00');
+    return d.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  }
+
+  function formatNowFR() {
+    return new Date().toLocaleString('fr-FR', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+      hour: '2-digit', minute: '2-digit'
+    });
+  }
+
+  // Renvoie tous les chauffeurs avec au moins une tournée PLANIFIÉE à la date donnée.
+  // Les tours dans d'autres statuts (effectué, annulé, chute, débord, passage à vide)
+  // sont filtrés et n'apparaissent pas dans le PDF.
+  function getChauffeursAvecTournees(dateISO) {
+    const chs = [];
+    state.chauffeurs.forEach(ch => {
+      const planning = (typeof getPlanningForCell === 'function')
+        ? getPlanningForCell(ch._id, dateISO)
+        : state.plannings.find(p =>
+            String(p.chauffeurId?._id || p.chauffeurId) === String(ch._id)
+            && p.date === dateISO
+          );
+      if (!planning || !planning.tours) return;
+      const planifies = planning.tours.filter(t => t.statut === 'planifie');
+      if (planifies.length > 0) {
+        chs.push({ chauffeur: ch, tours: planifies });
+      }
+    });
+    // Tri alphabétique nom puis prénom
+    chs.sort((a, b) =>
+      (a.chauffeur.nom || '').localeCompare(b.chauffeur.nom || '') ||
+      (a.chauffeur.prenom || '').localeCompare(b.chauffeur.prenom || '')
+    );
+    return chs;
+  }
+
+  // Camion "principal" de la journée = immat la plus représentée
+  function getCamionPrincipal(tours) {
+    const count = {};
+    tours.forEach(t => {
+      if (t.immatCamion) count[t.immatCamion] = (count[t.immatCamion] || 0) + 1;
+    });
+    const entries = Object.entries(count);
+    if (!entries.length) return '—';
+    entries.sort((a, b) => b[1] - a[1]);
+    // Si plusieurs camions différents, on liste les immat uniques
+    if (entries.length === 1) return entries[0][0];
+    return entries.map(e => e[0]).join(' / ');
+  }
+
+  // ─── Modal de configuration ──────────────────────────────────────────────────
+  function buildPrintModal() {
+    // Supprimer une instance existante
+    document.getElementById('printSheetModal')?.remove();
+
+    // Date par défaut = première date de la vue actuelle, sinon aujourd'hui
+    const defaultDateISO = state.currentDate
+      || (state.viewStart ? toISO(state.viewStart) : toISO(new Date()));
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay';
+    overlay.id = 'printSheetModal';
+    overlay.style.display = 'flex';
+    overlay.innerHTML = `
+      <div class="modal" style="max-width: 600px;">
+        <div class="modal-header">
+          <h2 class="modal-title">Feuilles de tournée</h2>
+          <button class="modal-close" id="printModalClose">&times;</button>
+        </div>
+
+        <div class="modal-body" style="padding-top: 8px;">
+
+          <!-- Section 1 : date -->
+          <div class="form-row" style="margin-bottom: 18px;">
+            <div class="form-group full-width">
+              <label style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:600;">
+                Date
+              </label>
+              <input type="date" id="printDate" value="${defaultDateISO}"
+                     style="font-size:15px; font-weight:600;" />
+            </div>
+          </div>
+
+          <!-- Section 2 : chauffeurs -->
+          <div class="form-row" style="margin-bottom: 14px;">
+            <div class="form-group full-width">
+              <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
+                <label style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:600; margin:0;">
+                  Chauffeurs <span id="printChauffeurCount" style="color:var(--text-subtle); font-weight:500;"></span>
+                </label>
+                <div style="display:flex; gap:4px;">
+                  <button type="button" id="printSelectAll"
+                          style="padding:3px 9px; font-size:11px; background:transparent; border:1px solid var(--border); border-radius:5px; color:var(--text-muted); cursor:pointer; font-family:inherit;">
+                    Tout cocher
+                  </button>
+                  <button type="button" id="printSelectNone"
+                          style="padding:3px 9px; font-size:11px; background:transparent; border:1px solid var(--border); border-radius:5px; color:var(--text-muted); cursor:pointer; font-family:inherit;">
+                    Tout décocher
+                  </button>
+                </div>
+              </div>
+
+              <div id="printChauffeurList"
+                   style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border);
+                          border-radius: var(--radius); background: var(--bg);">
+                <div style="text-align:center; color:var(--text-muted); padding:24px; font-size:13px;">
+                  Sélectionne une date pour voir les chauffeurs.
+                </div>
+              </div>
+
+              <p style="font-size:11.5px; color:var(--text-muted); margin:8px 2px 0; line-height:1.4;">
+                Seules les tournées au statut <strong>Planifié</strong> sont incluses dans le PDF.
+              </p>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="modal-footer">
+          <button class="btn btn-ghost"   id="printModalCancel">Annuler</button>
+          <button class="btn btn-primary" id="printModalGenerate">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px; margin-right:6px;">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Télécharger le PDF
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    // ── Listeners ─────────────────────────────────────────────────────────────
+    const close = () => overlay.remove();
+    document.getElementById('printModalClose').addEventListener('click', close);
+    document.getElementById('printModalCancel').addEventListener('click', close);
+    overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+    const dateInput = document.getElementById('printDate');
+    dateInput.addEventListener('change', () => refreshChauffeurList());
+
+    document.getElementById('printSelectAll').addEventListener('click', () => {
+      document.querySelectorAll('#printChauffeurList input[type="checkbox"]').forEach(cb => cb.checked = true);
+    });
+    document.getElementById('printSelectNone').addEventListener('click', () => {
+      document.querySelectorAll('#printChauffeurList input[type="checkbox"]').forEach(cb => cb.checked = false);
+    });
+
+    document.getElementById('printModalGenerate').addEventListener('click', async () => {
+      const dateISO = dateInput.value;
+      if (!dateISO) { notify('Choisis une date.', 'warning'); return; }
+
+      const checked = Array.from(document.querySelectorAll('#printChauffeurList input[type="checkbox"]:checked'))
+        .map(cb => cb.dataset.chauffeurId);
+      if (!checked.length) { notify('Sélectionne au moins un chauffeur.', 'warning'); return; }
+
+      try {
+        showLoader();
+        await ensurePlanningsLoadedFor(dateISO);
+        await generatePDF(dateISO, checked);
+        close();
+      } catch (e) {
+        notify('Erreur génération PDF : ' + e.message, 'error');
+      } finally {
+        hideLoader();
+      }
+    });
+
+    // Premier remplissage
+    refreshChauffeurList();
+  }
+
+  function refreshChauffeurList() {
+    const dateISO = document.getElementById('printDate').value;
+    const listEl  = document.getElementById('printChauffeurList');
+    const countEl = document.getElementById('printChauffeurCount');
+    if (!dateISO) return;
+
+    // Si la date est en dehors de la vue chargée, on charge en arrière-plan
+    ensurePlanningsLoadedFor(dateISO).then(() => {
+      const items = getChauffeursAvecTournees(dateISO);
+
+      if (countEl) {
+        countEl.textContent = items.length
+          ? `· ${items.length} avec tournée${items.length > 1 ? 's' : ''}`
+          : '';
+      }
+
+      if (!items.length) {
+        listEl.innerHTML = `
+          <div style="text-align:center; color:var(--text-muted); padding:32px 16px; font-size:13px;">
+            Aucune tournée prévue pour cette date.
+          </div>`;
+        return;
+      }
+
+      listEl.innerHTML = items.map(({ chauffeur, tours }) => {
+        const nbTours  = tours.length;
+        const camion   = getCamionPrincipal(tours);
+        const initials = `${(chauffeur.prenom||'?')[0]}${(chauffeur.nom||'?')[0]}`.toUpperCase();
+        const cid      = chauffeur._id;
+        return `
+          <label class="print-ch-item" data-cid="${cid}"
+                 style="display:flex; align-items:center; gap:12px; padding:10px 12px;
+                        cursor:pointer; border-bottom:1px solid var(--border-light);
+                        transition: background .12s;"
+                 onmouseenter="this.style.background='var(--surface)'"
+                 onmouseleave="this.style.background=''">
+            <input type="checkbox" data-chauffeur-id="${cid}" checked
+                   style="width:16px; height:16px; cursor:pointer; flex-shrink:0; accent-color: var(--text);" />
+            <div style="width:34px; height:34px; border-radius:50%;
+                        background: var(--text); color:#fff;
+                        display:flex; align-items:center; justify-content:center;
+                        font-size:12px; font-weight:700; flex-shrink:0;">
+              ${initials}
+            </div>
+            <div style="flex:1; min-width:0;">
+              <div style="font-weight:600; font-size:13.5px; color:var(--text);">
+                ${chauffeur.prenom} ${chauffeur.nom}
+              </div>
+              <div style="font-size:11.5px; color:var(--text-muted); margin-top:1px;">
+                ${nbTours} tournée${nbTours>1?'s':''} · ${camion}
+              </div>
+            </div>
+          </label>
+        `;
+      }).join('');
+
+      // Clic n'importe où sur la card -> toggle la checkbox
+      listEl.querySelectorAll('.print-ch-item').forEach(row => {
+        row.addEventListener('click', e => {
+          if (e.target.tagName !== 'INPUT') {
+            const cb = row.querySelector('input[type="checkbox"]');
+            if (cb) cb.checked = !cb.checked;
+          }
+        });
+      });
+    });
+  }
+
+  // Si la date demandée n'est pas dans la vue actuelle, recharge le planning de ce jour
+  async function ensurePlanningsLoadedFor(dateISO) {
+    const hasIt = state.plannings.some(p => p.date === dateISO);
+    if (hasIt) return;
+    try {
+      // On recharge juste ce jour (start = end)
+      const data = await planningFetch(`/planning?startDate=${dateISO}&endDate=${dateISO}`);
+      // On merge dans state.plannings (en évitant les doublons)
+      const others = state.plannings.filter(p => p.date !== dateISO);
+      state.plannings = [...others, ...(Array.isArray(data) ? data : [])];
+    } catch (e) {
+      console.warn('Impossible de charger le planning pour', dateISO, e);
+    }
+  }
+
+  // ─── Chargement dynamique des libs PDF (si absentes) ─────────────────────────
+  // Évite d'avoir à modifier planning.html : si jsPDF/autotable ne sont pas là,
+  // on les charge depuis le CDN au moment où on en a besoin.
+  function loadScript(src) {
+    return new Promise((resolve, reject) => {
+      // Si déjà présent dans le DOM, on attend juste son chargement éventuel
+      const existing = document.querySelector(`script[src="${src}"]`);
+      if (existing) {
+        if (existing.dataset.loaded === '1') return resolve();
+        existing.addEventListener('load',  () => resolve());
+        existing.addEventListener('error', () => reject(new Error('Échec chargement ' + src)));
+        return;
+      }
+      const s = document.createElement('script');
+      s.src   = src;
+      s.async = true;
+      s.addEventListener('load',  () => { s.dataset.loaded = '1'; resolve(); });
+      s.addEventListener('error', () => reject(new Error('Échec chargement ' + src)));
+      document.head.appendChild(s);
+    });
+  }
+
+  async function ensurePdfLibsLoaded() {
+    const jsPDFReady     = () => !!(window.jspdf && window.jspdf.jsPDF);
+    const autoTableReady = () => {
+      if (!jsPDFReady()) return false;
+      // autotable s'enregistre sur le prototype de jsPDF
+      try { return typeof (new window.jspdf.jsPDF()).autoTable === 'function'; }
+      catch { return false; }
+    };
+
+    if (!jsPDFReady()) {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js');
+    }
+    if (!autoTableReady()) {
+      await loadScript('https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js');
+    }
+
+    if (!jsPDFReady())     throw new Error('jsPDF n\'a pas pu être chargé (CDN bloqué ?).');
+    if (!autoTableReady()) throw new Error('jspdf-autotable n\'a pas pu être chargé (CDN bloqué ?).');
+  }
+
+  // ─── Génération du PDF ───────────────────────────────────────────────────────
+  async function generatePDF(dateISO, selectedIds) {
+    await ensurePdfLibsLoaded();
+    const { jsPDF } = window.jspdf;
+
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    const pageW = doc.internal.pageSize.getWidth();   // 210
+    const pageH = doc.internal.pageSize.getHeight();  // 297
+    const margin = 12;
+
+    // Filtrer + ordonner les chauffeurs choisis (les tours sont déjà filtrés "planifie")
+    const items = getChauffeursAvecTournees(dateISO)
+      .filter(({ chauffeur }) => selectedIds.includes(String(chauffeur._id)));
+
+    if (!items.length) {
+      notify('Aucune tournée planifiée à imprimer.', 'warning');
+      return;
+    }
+
+    const totalPages = items.length;
+
+    // On charge le logo (si défini) une seule fois pour tout le PDF
+    const logoData = await loadImageAsDataURL(CONFIG.logoUrl);
+
+    items.forEach(({ chauffeur, tours }, pageIdx) => {
+      if (pageIdx > 0) doc.addPage();
+
+      drawHeader(doc, pageW, margin, dateISO, logoData);
+      const yAfterInfo = drawInfoBlock(doc, chauffeur, dateISO, tours, margin, pageW);
+      drawToursTable(doc, tours, yAfterInfo + 4, margin, pageW, pageH);
+      drawFooter(doc, pageW, pageH, margin, pageIdx + 1, totalPages);
+    });
+
+    const filename = `feuilles-tournee_${dateISO}.pdf`;
+    doc.save(filename);
+    notify(`PDF généré (${items.length} chauffeur${items.length>1?'s':''}).`, 'success');
+  }
+
+  // ── En-tête : logo + brand + titre, version sobre noir/gris ──────────────────
+  function drawHeader(doc, pageW, margin, dateISO, logoData) {
+    const baseY = margin;
+    const logoSize = CONFIG.logoSize || 28;
+
+    // ── Logo à gauche ──
+    if (logoData) {
+      try {
+        doc.addImage(logoData, 'PNG', margin, baseY, logoSize, logoSize);
+      } catch (e) {
+        drawLogoPlaceholder(doc, margin, baseY, logoSize);
+      }
+    } else {
+      drawLogoPlaceholder(doc, margin, baseY, logoSize);
+    }
+
+    // ── Bloc texte brand juste à droite du logo (centré verticalement) ──
+    // On centre les 2 lignes par rapport au logo (centre vertical = baseY + logoSize/2)
+    const centerY = baseY + logoSize / 2;
+    const textX = margin + logoSize + 6;
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(19);
+    doc.setTextColor(26, 29, 35);
+    doc.text(CONFIG.brandName, textX, centerY - 0.5);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    doc.setTextColor(120, 124, 132);
+    doc.text(CONFIG.brandTagline, textX, centerY + 5);
+
+    // ── Titre à droite (aligné verticalement avec le brand) ──
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(12.5);
+    doc.setTextColor(26, 29, 35);
+    doc.text('FEUILLE DE TOURNÉE', pageW - margin, centerY - 0.5, { align: 'right' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    doc.setTextColor(107, 114, 128);
+    doc.text(formatDateLongFR(dateISO), pageW - margin, centerY + 5, { align: 'right' });
+
+    // ── Trait de séparation ──
+    doc.setDrawColor(220, 222, 228);
+    doc.setLineWidth(0.4);
+    doc.line(margin, baseY + logoSize + 4, pageW - margin, baseY + logoSize + 4);
+  }
+
+  // Placeholder neutre quand aucun logo n'est fourni
+  function drawLogoPlaceholder(doc, x, y, size) {
+    doc.setDrawColor(180, 184, 192);
+    doc.setLineWidth(0.4);
+    doc.setFillColor(245, 246, 248);
+    doc.roundedRect(x, y, size, size, 2.5, 2.5, 'FD');
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(150, 154, 162);
+    doc.text('LOGO', x + size / 2, y + size / 2 + 1.2, { align: 'center' });
+  }
+
+  // ── Bloc info chauffeur / camion (sobre, sans fond coloré) ───────────────────
+  function drawInfoBlock(doc, chauffeur, dateISO, tours, margin, pageW) {
+    // baseY = margin + logoSize + trait (+4) + un peu d'air (+6)
+    const y0 = margin + (CONFIG.logoSize || 28) + 10;
+    const w = pageW - margin * 2;
+    const colW = w / 2;
+    const h = 16;
+
+    // Pas de fond, juste deux blocs de texte séparés par un trait vertical fin
+    doc.setDrawColor(230, 232, 236);
+    doc.setLineWidth(0.3);
+    doc.line(margin + colW, y0 + 1, margin + colW, y0 + h - 1);
+
+    // Labels (petits, en uppercase, gris)
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(140, 144, 152);
+    doc.text('CHAUFFEUR', margin,        y0 + 3);
+    doc.text('CAMION(S)', margin + colW + 4, y0 + 3);
+
+    // Valeur chauffeur
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.setTextColor(26, 29, 35);
+    const chauffeurName = `${chauffeur.prenom || ''} ${chauffeur.nom || ''}`.trim() || '—';
+    doc.text(chauffeurName, margin, y0 + 9);
+
+    // Sous-info : téléphone + nb tournées
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(120, 124, 132);
+    const sub = [
+      chauffeur.telephone ? `Tél. ${chauffeur.telephone}` : null,
+      `${tours.length} tournée${tours.length > 1 ? 's' : ''}`
+    ].filter(Boolean).join('  ·  ');
+    doc.text(sub, margin, y0 + 14);
+
+    // Valeur camion
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.setTextColor(26, 29, 35);
+    const camion = getCamionPrincipal(tours);
+    const camionLines = doc.splitTextToSize(camion, colW - 6);
+    doc.text(camionLines[0] || '—', margin + colW + 4, y0 + 9);
+    if (camionLines.length > 1) {
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(120, 124, 132);
+      doc.text(camionLines.slice(1).join(' '), margin + colW + 4, y0 + 14);
+    }
+
+    return y0 + h;
+  }
+
+  // ── Tableau des tournées (sobre, monochrome) ──────────────────────────────────
+  function drawToursTable(doc, tours, yStart, margin, pageW, pageH) {
+    // Titre de section
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(26, 29, 35);
+    doc.text(`TOURNÉES (${tours.length})`, margin, yStart + 4);
+
+    doc.setDrawColor(26, 29, 35);
+    doc.setLineWidth(0.4);
+    doc.line(margin, yStart + 5.5, pageW - margin, yStart + 5.5);
+
+    const tableStartY = yStart + 8;
+
+    if (!tours.length) {
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(10);
+      doc.setTextColor(156, 163, 175);
+      doc.text('Aucune tournée à afficher (les annulées sont masquées).',
+        margin, tableStartY + 8);
+      return tableStartY + 12;
+    }
+
+    // Préparation des données — sans la colonne Statut
+    const body = tours.map((t, i) => {
+      const num    = String(i + 1);
+      const type   = t.type === 'regie' ? 'RÉGIE' : 'TOUR';
+      const periode = (t.heurePeriode || 'journee').toUpperCase() === 'NUIT' ? 'NUIT' : 'JOUR';
+      const typeCell = `${type}\n${periode}`;
+
+      const client = cleanText(t.client) || '—';
+
+      let lieu;
+      if (t.type === 'regie') {
+        lieu = cleanText(t.lieuChantier) || '—';
+      } else {
+        const s = cleanText(t.source) || '—';
+        const d = cleanText(t.destination) || '—';
+        lieu = `${s}\n» ${d}`;
+      }
+
+      const camion = t.immatCamion || '—';
+      const ref    = t.refTransport || '';
+      const notes  = cleanText(t.notes);
+      const extras = [];
+      if (ref)   extras.push(`Réf: ${ref}`);
+      if (notes) extras.push(`Note: ${notes}`);
+      const extra = extras.join('\n');
+
+      return [num, typeCell, client, lieu, camion, extra];
+    });
+
+    doc.autoTable({
+      startY: tableStartY,
+      head: [['#', 'Type', "Donneur d'ordre ", 'Trajet / Chantier', 'Camion', 'Réf · Notes']],
+      body: body,
+      margin: { left: margin, right: margin },
+      styles: {
+        font:        'helvetica',
+        fontSize:    9,
+        cellPadding: 2.8,
+        lineColor:   [220, 222, 228],
+        lineWidth:   0.2,
+        valign:      'top',
+        textColor:   [26, 29, 35],
+      },
+      headStyles: {
+        fillColor:   [26, 29, 35],   // noir doux
+        textColor:   [255, 255, 255],
+        fontStyle:   'bold',
+        fontSize:    8.5,
+        halign:      'left',
+      },
+      alternateRowStyles: { fillColor: [250, 250, 251] },
+      columnStyles: {
+        0: { cellWidth: 8,  halign: 'center', fontStyle: 'bold' },
+        1: { cellWidth: 18, halign: 'center', fontStyle: 'bold', fontSize: 8 },
+        2: { cellWidth: 36, fontStyle: 'bold' },
+        3: { cellWidth: 'auto' },
+        4: { cellWidth: 24, halign: 'center', font: 'courier', fontSize: 9 },
+        5: { cellWidth: 42, fontSize: 8, textColor: [107, 114, 128] },
+      },
+    });
+
+    return doc.lastAutoTable.finalY;
+  }
+
+  // ── Pied de page ──────────────────────────────────────────────────────────────
+  function drawFooter(doc, pageW, pageH, margin, pageNum, totalPages) {
+    const y = pageH - 8;
+    doc.setDrawColor(226, 228, 233);
+    doc.setLineWidth(0.2);
+    doc.line(margin, y - 3, pageW - margin, y - 3);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7);
+    doc.setTextColor(156, 163, 175);
+    doc.text(`Imprimé le ${formatNowFR()}`, margin, y);
+    doc.text(`Page ${pageNum}/${totalPages}`, pageW - margin, y, { align: 'right' });
+    doc.text('Yovatrans · Document interne', pageW / 2, y, { align: 'center' });
+  }
+
+  // ─── Bouton dans le header ───────────────────────────────────────────────────
+  function injectPrintButton() {
+    if (document.getElementById('printSheetBtn')) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'printSheetBtn';
+    btn.className = 'nav-btn import-toggle-btn'; // réutilise le style existant
+    btn.title = 'Imprimer les feuilles de tournée du jour';
+    btn.innerHTML = `
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+           stroke-linecap="round" stroke-linejoin="round">
+        <polyline points="6 9 6 2 18 2 18 9"/>
+        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+        <rect x="6" y="14" width="12" height="8"/>
+      </svg>
+      Feuilles de tournée
+    `;
+    btn.addEventListener('click', () => buildPrintModal());
+
+    // On insère juste après le bouton "Import PDF" pour rester cohérent
+    const importBtn = document.getElementById('importPanelToggle');
+    if (importBtn && importBtn.parentNode) {
+      importBtn.parentNode.insertBefore(btn, importBtn.nextSibling);
+    } else {
+      // Fallback : on l'ajoute dans .header-right
+      document.querySelector('.header-right')?.prepend(btn);
+    }
+  }
+
+  // ─── Init après DOMContentLoaded ─────────────────────────────────────────────
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', injectPrintButton);
+  } else {
+    injectPrintButton();
+  }
+})();

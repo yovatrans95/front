@@ -409,15 +409,17 @@ function analyseActivityBlock(blockLines) {
   var refMatch = joined.match(/\b(1\d{6})\b/); // ex: 1205587
   if (refMatch) refMauffrey = refMatch[1];
 
-  var codeDashdoc = '';
-  var tokens = joined.match(/\b[A-Z0-9]{6}\b/g) || [];
-  for (var t = 0; t < tokens.length; t++) {
-    var token = tokens[t];
-    if (/^\d+$/.test(token)) continue;
-    if (/^(YOVATR|MANGEE|MENAGE|DECHET|SELECT|ROUTE)$/i.test(token)) continue;
-    codeDashdoc = token;
-    break;
-  }
+  // ─── Code Dashdoc ────────────────────────────────────────────────────────
+  // Bug historique : on prenait le PREMIER token 6 caractères [A-Z0-9],
+  // ce qui captait des noms de clients/sites/matières (SYCTOM, VEOLIA, ESIANE,
+  // BORNEL, VENANT…) au lieu du vrai code Dashdoc (PRHRZA, 3LHBUW, W344D8…).
+  //
+  // Règle générale (structurelle, pas linguistique) : dans le tableau Mauffrey,
+  // le Code Dashdoc est TOUJOURS la cellule située juste à droite de la Ref
+  // interne Mauffrey. Donc dans le flux PDF on a toujours : "1208438 PRHRZA"
+  // (adjacents). C'est cette adjacence qui définit le code — voir
+  // extractCodeDashdoc() pour le détail.
+  var codeDashdoc = extractCodeDashdoc(joined, refMauffrey);
 
   var content = lines.filter(function(l) {
     return isUsefulActivityLine(l);
@@ -458,6 +460,38 @@ function analyseActivityBlock(blockLines) {
     codeDashdoc: codeDashdoc,
     heure: heure
   };
+}
+
+// ── Code Dashdoc : extraction par règle structurelle ──────────────────────
+// Le PDF Mauffrey imprime un tableau dont les DEUX DERNIÈRES COLONNES sont
+// toujours, dans cet ordre :  "Ref interne Mauffrey" | "Code Dashdoc"
+// Après extraction par pdf.js et join(' '), on retrouve donc systématiquement
+// le motif :  "1208438 PRHRZA"  — la ref Mauffrey (7 chiffres commençant par 1)
+// immédiatement suivie du code Dashdoc (6 caractères [A-Z0-9]).
+//
+// Cette adjacence EST la signature. On ne s'appuie sur AUCUNE heuristique
+// linguistique (blocklist de mots, ratio voyelles/consonnes, etc.), juste
+// sur la structure du tableau. Du coup :
+//   - aucun risque de capter un nom de client/site/matière en 6 lettres ;
+//   - aucune liste à maintenir quand un nouveau client apparaît ;
+//   - si la ref Mauffrey n'est pas trouvée, on retourne vide plutôt qu'un
+//     faux positif issu d'un scan trop large.
+function extractCodeDashdoc(joined, refMauffrey) {
+  if (!refMauffrey) return '';
+
+  // Cas normal : "<ref> <code>"
+  var rxAfter = new RegExp('\\b' + refMauffrey + '\\b\\s*([A-Z0-9]{6})\\b');
+  var mA = joined.match(rxAfter);
+  if (mA) return mA[1];
+
+  // Cas dégradé : pdf.js a parfois inversé l'ordre des items selon le flux
+  // graphique → on tolère "<code> <ref>" comme repli (toujours basé sur
+  // l'adjacence, pas sur un scan global).
+  var rxBefore = new RegExp('\\b([A-Z0-9]{6})\\b\\s+\\b' + refMauffrey + '\\b');
+  var mB = joined.match(rxBefore);
+  if (mB) return mB[1];
+
+  return '';
 }
 
 function isUsefulActivityLine(l) {

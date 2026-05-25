@@ -687,10 +687,11 @@ function getPlanningForCell(chauffeurId, dateISO) {
   );
 }
 function filterTours(tours) {
+  const filterClientKey = state.filterClient ? normalizeClientKey(state.filterClient) : '';
   return tours.filter(t => {
     if (state.filterStatut && t.statut !== state.filterStatut) return false;
     if (state.filterType   && t.type   !== state.filterType)   return false;
-    if (state.filterClient && t.client !== state.filterClient) return false;
+    if (filterClientKey && normalizeClientKey(t.client) !== filterClientKey) return false;
     return true;
   });
 }
@@ -1049,6 +1050,18 @@ function closeModal() {
   document.getElementById('tourModal').style.display = 'none';
 }
 
+// Si le client saisi correspond (insensible casse/accents/espaces) à un client
+// déjà existant dans state.clientsList, on réutilise sa forme exacte.
+// Évite de créer "MAUFFREY" en double quand "Mauffrey" existe déjà.
+function canonicalizeClientName(name) {
+  const raw = String(name || '').trim();
+  if (!raw) return raw;
+  const key = normalizeClientKey(raw);
+  if (!key) return raw;
+  const existing = (state.clientsList || []).find(c => normalizeClientKey(c) === key);
+  return existing || raw;
+}
+
 function getFormData() {
   const type = document.querySelector('input[name="tourType"]:checked').value;
   const statut = document.getElementById('fStatut').value || state.currentTourStatut || 'planifie';
@@ -1056,7 +1069,7 @@ function getFormData() {
     type,
     statut,
     clientSource:  'manuel', // Le modal ne sert que pour la saisie manuelle (l'import PDF Mauffrey a son propre panneau)
-    client:        document.getElementById('fClient').value.trim(),
+    client:        canonicalizeClientName(document.getElementById('fClient').value),
     immatCamion:   document.getElementById('fImmat').value.trim(),
     heurePeriode:  document.getElementById('fPeriode').value,
     source:        type === 'tour' ? document.getElementById('fSource').value.trim()      : '',
@@ -1105,21 +1118,69 @@ async function handleDelete() {
   }
 }
 
+// ─── Normalisation client (dédup casse / accents / espaces) ──────────────────
+// "Mauffrey", "MAUFFREY", "  mauffrey ", "Mauffréy" -> tous la même clé.
+function normalizeClientKey(name) {
+  return String(name || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+// Choisit la forme d'affichage la plus "naturelle" parmi des variantes :
+// "Mauffrey" (mixte) > "mauffrey" (tout minuscule) > "MAUFFREY" (tout majuscule).
+function pickBestDisplayName(names) {
+  const score = (s) => {
+    const hasLower = /[a-zà-ÿ]/.test(s);
+    const hasUpper = /[A-ZÀ-Ý]/.test(s);
+    if (hasLower && hasUpper) return 3; // mixte (Title Case, Mauffrey)
+    if (hasLower) return 2;             // tout minuscule
+    if (hasUpper) return 1;             // tout majuscule (MAUFFREY)
+    return 0;
+  };
+  return names.slice().sort((a, b) => score(b) - score(a))[0];
+}
+
+// Dédoublonne une liste de noms de clients (insensible casse/accents/espaces).
+// Renvoie un tableau trié alphabétiquement, avec pour chaque clé la meilleure forme d'affichage.
+function dedupeClientList(list) {
+  const byKey = new Map(); // key -> [variantes vues]
+  (list || []).forEach(c => {
+    const name = String(c || '').trim();
+    if (!name) return;
+    const key = normalizeClientKey(name);
+    if (!byKey.has(key)) byKey.set(key, []);
+    byKey.get(key).push(name);
+  });
+  const out = [];
+  byKey.forEach(variants => out.push(pickBestDisplayName(variants)));
+  out.sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+  return out;
+}
+
 // ─── Filtres ──────────────────────────────────────────────────────────────────
 function populateClientFilter() {
   const sel = document.getElementById('filterClient');
   const cur = sel.value;
+  // Dédup insensible à casse/accents : "Mauffrey" et "MAUFFREY" -> un seul item
+  const uniqueClients = dedupeClientList(state.clientsList);
   sel.innerHTML = '<option value="">Tous les clients</option>';
-  state.clientsList.forEach(c => {
+  uniqueClients.forEach(c => {
     const opt = document.createElement('option');
     opt.value = c; opt.textContent = c;
     sel.appendChild(opt);
   });
-  sel.value = cur;
+  // On restaure la sélection courante si elle existe encore (en dédup-insensible)
+  if (cur) {
+    const matching = uniqueClients.find(c => normalizeClientKey(c) === normalizeClientKey(cur));
+    sel.value = matching || '';
+  }
   const dl = document.getElementById('clientSuggestions');
   if (!dl) return;
   dl.innerHTML = '';
-  state.clientsList.forEach(c => {
+  uniqueClients.forEach(c => {
     const opt = document.createElement('option'); opt.value = c; dl.appendChild(opt);
   });
 }

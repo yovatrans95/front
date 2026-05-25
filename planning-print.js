@@ -35,6 +35,26 @@
     effectue:     'Effectué',
   };
 
+  // Libellés courts (utilisés dans la colonne Statut du PDF, où la largeur est limitée)
+  const STATUT_LABELS_SHORT = {
+    planifie:     'Planifié',
+    annule:       'Annulé',
+    chute:        'Chute',
+    debord:       'Débord',
+    passage_vide: 'Pass. vide',
+    effectue:     'Effectué',
+  };
+
+  // Couleur du texte par statut (cellule colorée dans le tableau)
+  const STATUT_PDF_COLOR = {
+    planifie:     [29, 78, 216],    // bleu
+    effectue:     [21, 128, 61],    // vert
+    annule:       [120, 113, 108],  // gris
+    chute:        [194, 65, 12],    // orange foncé
+    debord:       [185, 28, 28],    // rouge
+    passage_vide: [126, 34, 206],   // violet
+  };
+
   const DAYS_FULL_FR = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi'];
 
   // Charge une URL d'image et la renvoie en dataURL base64 (pour jsPDF.addImage)
@@ -130,10 +150,11 @@
     });
   }
 
-  // Renvoie tous les chauffeurs avec au moins une tournée PLANIFIÉE à la date donnée.
-  // Les tours dans d'autres statuts (effectué, annulé, chute, débord, passage à vide)
-  // sont filtrés et n'apparaissent pas dans le PDF.
-  function getChauffeursAvecTournees(dateISO) {
+  // Renvoie tous les chauffeurs ayant au moins une tournée à la date donnée
+  // dont le statut est dans `statuts` (tableau, ex: ['planifie','effectue']).
+  // Si statuts est absent ou vide, on retombe sur ['planifie'] (comportement historique).
+  function getChauffeursAvecTournees(dateISO, statuts) {
+    const allowed = (Array.isArray(statuts) && statuts.length) ? statuts : ['planifie'];
     const chs = [];
     state.chauffeurs.forEach(ch => {
       const planning = (typeof getPlanningForCell === 'function')
@@ -143,9 +164,9 @@
             && p.date === dateISO
           );
       if (!planning || !planning.tours) return;
-      const planifies = planning.tours.filter(t => t.statut === 'planifie');
-      if (planifies.length > 0) {
-        chs.push({ chauffeur: ch, tours: planifies });
+      const tours = planning.tours.filter(t => allowed.includes(t.statut));
+      if (tours.length > 0) {
+        chs.push({ chauffeur: ch, tours: tours });
       }
     });
     // Tri alphabétique nom puis prénom
@@ -154,6 +175,57 @@
       (a.chauffeur.prenom || '').localeCompare(b.chauffeur.prenom || '')
     );
     return chs;
+  }
+
+  // Normalise un nom de client pour dédoublonner les variantes de casse / accents / espaces.
+  // "Mauffrey", "MAUFFREY", "  mauffrey ", "Mauffréy" -> tous la même clé.
+  // Le nom *affiché* reste celui rencontré en premier (on ne change pas la mise en forme).
+  function normalizeClientKey(name) {
+    return String(name || '')
+      .normalize('NFD')                 // décompose les accents
+      .replace(/[\u0300-\u036f]/g, '')  // supprime les diacritiques
+      .replace(/\s+/g, ' ')             // espaces multiples -> simple
+      .trim()
+      .toLowerCase();
+  }
+
+  // Renvoie les clients ayant au moins une tournée à la date donnée dont le statut
+  // est dans `statuts`. Chaque tour est annoté avec son chauffeur (champ `_chauffeur`)
+  // afin que la page PDF "par client" puisse afficher qui a fait la tournée.
+  // Les variantes de casse/accents/espaces sur le même client sont fusionnées.
+  function getClientsAvecTournees(dateISO, statuts) {
+    const allowed = (Array.isArray(statuts) && statuts.length) ? statuts : ['planifie'];
+    // clé normalisée -> { client (affichage), key, tours: [{...tour, _chauffeur}] }
+    const byKey = new Map();
+    state.chauffeurs.forEach(ch => {
+      const planning = (typeof getPlanningForCell === 'function')
+        ? getPlanningForCell(ch._id, dateISO)
+        : state.plannings.find(p =>
+            String(p.chauffeurId?._id || p.chauffeurId) === String(ch._id)
+            && p.date === dateISO
+          );
+      if (!planning || !planning.tours) return;
+      planning.tours.forEach(t => {
+        if (!allowed.includes(t.statut)) return;
+        const rawName = (t.client || '').trim() || '(Sans client)';
+        const key     = normalizeClientKey(rawName) || '(sans client)';
+        if (!byKey.has(key)) {
+          byKey.set(key, { client: rawName, key, tours: [] });
+        }
+        byKey.get(key).tours.push(Object.assign({}, t, { _chauffeur: ch }));
+      });
+    });
+    const arr = Array.from(byKey.values());
+    arr.sort((a, b) => a.client.localeCompare(b.client));
+    // Pour chaque client, on trie les tours par nom de chauffeur pour la lisibilité
+    arr.forEach(grp => {
+      grp.tours.sort((a, b) => {
+        const an = `${a._chauffeur.nom || ''} ${a._chauffeur.prenom || ''}`;
+        const bn = `${b._chauffeur.nom || ''} ${b._chauffeur.prenom || ''}`;
+        return an.localeCompare(bn);
+      });
+    });
+    return arr;
   }
 
   // Camion "principal" de la journée = immat la plus représentée
@@ -203,12 +275,53 @@
             </div>
           </div>
 
-          <!-- Section 2 : chauffeurs -->
+          <!-- Section 2 : statuts à inclure -->
+          <div class="form-row" style="margin-bottom: 16px;">
+            <div class="form-group full-width">
+              <label style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:600; margin-bottom:8px; display:block;">
+                Statuts à inclure
+              </label>
+              <div id="printStatutsList" style="display:flex; flex-wrap:wrap; gap:6px 10px;">
+                ${Object.entries(STATUT_LABELS).map(([key, label]) => `
+                  <label style="display:inline-flex; align-items:center; gap:6px; padding:5px 10px;
+                                border:1px solid var(--border); border-radius:6px;
+                                background:var(--bg); cursor:pointer; font-size:12.5px;">
+                    <input type="checkbox" data-statut="${key}" ${key === 'planifie' ? 'checked' : ''}
+                           style="width:14px; height:14px; cursor:pointer; accent-color: var(--text);" />
+                    ${label}
+                  </label>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 3 : regroupement -->
+          <div class="form-row" style="margin-bottom: 16px;">
+            <div class="form-group full-width">
+              <label style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:600; margin-bottom:8px; display:block;">
+                Regroupement (1 page par...)
+              </label>
+              <div style="display:flex; gap:18px;">
+                <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+                  <input type="radio" name="printGroupMode" value="chauffeur" checked
+                         style="width:15px; height:15px; cursor:pointer; accent-color: var(--text);" />
+                  Chauffeur
+                </label>
+                <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+                  <input type="radio" name="printGroupMode" value="client"
+                         style="width:15px; height:15px; cursor:pointer; accent-color: var(--text);" />
+                  Client
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 4 : sélection (chauffeurs ou clients selon le mode) -->
           <div class="form-row" style="margin-bottom: 14px;">
             <div class="form-group full-width">
               <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
                 <label style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:600; margin:0;">
-                  Chauffeurs <span id="printChauffeurCount" style="color:var(--text-subtle); font-weight:500;"></span>
+                  <span id="printListLabel">Chauffeurs</span> <span id="printChauffeurCount" style="color:var(--text-subtle); font-weight:500;"></span>
                 </label>
                 <div style="display:flex; gap:4px;">
                   <button type="button" id="printSelectAll"
@@ -226,13 +339,9 @@
                    style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border);
                           border-radius: var(--radius); background: var(--bg);">
                 <div style="text-align:center; color:var(--text-muted); padding:24px; font-size:13px;">
-                  Sélectionne une date pour voir les chauffeurs.
+                  Sélectionne une date pour voir la liste.
                 </div>
               </div>
-
-              <p style="font-size:11.5px; color:var(--text-muted); margin:8px 2px 0; line-height:1.4;">
-                Seules les tournées au statut <strong>Planifié</strong> sont incluses dans le PDF.
-              </p>
             </div>
           </div>
 
@@ -261,7 +370,17 @@
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
 
     const dateInput = document.getElementById('printDate');
-    dateInput.addEventListener('change', () => refreshChauffeurList());
+    dateInput.addEventListener('change', () => refreshList());
+
+    // Cocher/décocher un statut -> rafraîchir la liste pour refléter qui apparaît
+    document.querySelectorAll('#printStatutsList input[type="checkbox"]').forEach(cb => {
+      cb.addEventListener('change', () => refreshList());
+    });
+
+    // Changer de mode (chauffeur <-> client) -> rafraîchir la liste
+    document.querySelectorAll('input[name="printGroupMode"]').forEach(r => {
+      r.addEventListener('change', () => refreshList());
+    });
 
     document.getElementById('printSelectAll').addEventListener('click', () => {
       document.querySelectorAll('#printChauffeurList input[type="checkbox"]').forEach(cb => cb.checked = true);
@@ -274,14 +393,22 @@
       const dateISO = dateInput.value;
       if (!dateISO) { notify('Choisis une date.', 'warning'); return; }
 
+      const statuts = getSelectedStatuts();
+      if (!statuts.length) { notify('Sélectionne au moins un statut à inclure.', 'warning'); return; }
+
+      const mode = getSelectedGroupMode();
+
       const checked = Array.from(document.querySelectorAll('#printChauffeurList input[type="checkbox"]:checked'))
-        .map(cb => cb.dataset.chauffeurId);
-      if (!checked.length) { notify('Sélectionne au moins un chauffeur.', 'warning'); return; }
+        .map(cb => cb.dataset.itemId);
+      if (!checked.length) {
+        notify(mode === 'client' ? 'Sélectionne au moins un client.' : 'Sélectionne au moins un chauffeur.', 'warning');
+        return;
+      }
 
       try {
         showLoader();
         await ensurePlanningsLoadedFor(dateISO);
-        await generatePDF(dateISO, checked);
+        await generatePDF(dateISO, checked, statuts, mode);
         close();
       } catch (e) {
         notify('Erreur génération PDF : ' + e.message, 'error');
@@ -291,73 +418,172 @@
     });
 
     // Premier remplissage
-    refreshChauffeurList();
+    refreshList();
   }
 
-  function refreshChauffeurList() {
+  // Lit les statuts cochés dans la modal
+  function getSelectedStatuts() {
+    return Array.from(document.querySelectorAll('#printStatutsList input[type="checkbox"]:checked'))
+      .map(cb => cb.dataset.statut);
+  }
+
+  // Lit le mode de regroupement choisi
+  function getSelectedGroupMode() {
+    const r = document.querySelector('input[name="printGroupMode"]:checked');
+    return (r && r.value) || 'chauffeur';
+  }
+
+  // Rafraîchit la liste centrale : chauffeurs ou clients selon le mode.
+  function refreshList() {
     const dateISO = document.getElementById('printDate').value;
     const listEl  = document.getElementById('printChauffeurList');
     const countEl = document.getElementById('printChauffeurCount');
+    const labelEl = document.getElementById('printListLabel');
     if (!dateISO) return;
+
+    const statuts = getSelectedStatuts();
+    const mode    = getSelectedGroupMode();
+
+    if (labelEl) labelEl.textContent = mode === 'client' ? 'Clients' : 'Chauffeurs';
+
+    // Si pas de statut coché, on prévient et on vide la liste
+    if (!statuts.length) {
+      if (countEl) countEl.textContent = '';
+      listEl.innerHTML = `
+        <div style="text-align:center; color:var(--text-muted); padding:32px 16px; font-size:13px;">
+          Coche au moins un statut pour voir la liste.
+        </div>`;
+      return;
+    }
 
     // Si la date est en dehors de la vue chargée, on charge en arrière-plan
     ensurePlanningsLoadedFor(dateISO).then(() => {
-      const items = getChauffeursAvecTournees(dateISO);
+      if (mode === 'client') renderClientList(dateISO, statuts, listEl, countEl);
+      else                   renderChauffeurList(dateISO, statuts, listEl, countEl);
+    });
+  }
 
-      if (countEl) {
-        countEl.textContent = items.length
-          ? `· ${items.length} avec tournée${items.length > 1 ? 's' : ''}`
-          : '';
-      }
+  function renderChauffeurList(dateISO, statuts, listEl, countEl) {
+    const items = getChauffeursAvecTournees(dateISO, statuts);
 
-      if (!items.length) {
-        listEl.innerHTML = `
-          <div style="text-align:center; color:var(--text-muted); padding:32px 16px; font-size:13px;">
-            Aucune tournée prévue pour cette date.
-          </div>`;
-        return;
-      }
+    if (countEl) {
+      countEl.textContent = items.length
+        ? `· ${items.length} avec tournée${items.length > 1 ? 's' : ''}`
+        : '';
+    }
 
-      listEl.innerHTML = items.map(({ chauffeur, tours }) => {
-        const nbTours  = tours.length;
-        const camion   = getCamionPrincipal(tours);
-        const initials = `${(chauffeur.prenom||'?')[0]}${(chauffeur.nom||'?')[0]}`.toUpperCase();
-        const cid      = chauffeur._id;
-        return `
-          <label class="print-ch-item" data-cid="${cid}"
-                 style="display:flex; align-items:center; gap:12px; padding:10px 12px;
-                        cursor:pointer; border-bottom:1px solid var(--border-light);
-                        transition: background .12s;"
-                 onmouseenter="this.style.background='var(--surface)'"
-                 onmouseleave="this.style.background=''">
-            <input type="checkbox" data-chauffeur-id="${cid}" checked
-                   style="width:16px; height:16px; cursor:pointer; flex-shrink:0; accent-color: var(--text);" />
-            <div style="width:34px; height:34px; border-radius:50%;
-                        background: var(--text); color:#fff;
-                        display:flex; align-items:center; justify-content:center;
-                        font-size:12px; font-weight:700; flex-shrink:0;">
-              ${initials}
+    if (!items.length) {
+      listEl.innerHTML = `
+        <div style="text-align:center; color:var(--text-muted); padding:32px 16px; font-size:13px;">
+          Aucune tournée pour cette date avec les statuts choisis.
+        </div>`;
+      return;
+    }
+
+    listEl.innerHTML = items.map(({ chauffeur, tours }) => {
+      const nbTours  = tours.length;
+      const camion   = getCamionPrincipal(tours);
+      const initials = `${(chauffeur.prenom||'?')[0]}${(chauffeur.nom||'?')[0]}`.toUpperCase();
+      const cid      = chauffeur._id;
+      return `
+        <label class="print-ch-item" data-id="${cid}"
+               style="display:flex; align-items:center; gap:12px; padding:10px 12px;
+                      cursor:pointer; border-bottom:1px solid var(--border-light);
+                      transition: background .12s;"
+               onmouseenter="this.style.background='var(--surface)'"
+               onmouseleave="this.style.background=''">
+          <input type="checkbox" data-item-id="${cid}" checked
+                 style="width:16px; height:16px; cursor:pointer; flex-shrink:0; accent-color: var(--text);" />
+          <div style="width:34px; height:34px; border-radius:50%;
+                      background: var(--text); color:#fff;
+                      display:flex; align-items:center; justify-content:center;
+                      font-size:12px; font-weight:700; flex-shrink:0;">
+            ${initials}
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:600; font-size:13.5px; color:var(--text);">
+              ${chauffeur.prenom} ${chauffeur.nom}
             </div>
-            <div style="flex:1; min-width:0;">
-              <div style="font-weight:600; font-size:13.5px; color:var(--text);">
-                ${chauffeur.prenom} ${chauffeur.nom}
-              </div>
-              <div style="font-size:11.5px; color:var(--text-muted); margin-top:1px;">
-                ${nbTours} tournée${nbTours>1?'s':''} · ${camion}
-              </div>
+            <div style="font-size:11.5px; color:var(--text-muted); margin-top:1px;">
+              ${nbTours} tournée${nbTours>1?'s':''} · ${camion}
             </div>
-          </label>
-        `;
-      }).join('');
+          </div>
+        </label>
+      `;
+    }).join('');
 
-      // Clic n'importe où sur la card -> toggle la checkbox
-      listEl.querySelectorAll('.print-ch-item').forEach(row => {
-        row.addEventListener('click', e => {
-          if (e.target.tagName !== 'INPUT') {
-            const cb = row.querySelector('input[type="checkbox"]');
-            if (cb) cb.checked = !cb.checked;
-          }
-        });
+    bindRowClicks(listEl);
+  }
+
+  function renderClientList(dateISO, statuts, listEl, countEl) {
+    const items = getClientsAvecTournees(dateISO, statuts);
+
+    if (countEl) {
+      countEl.textContent = items.length
+        ? `· ${items.length} client${items.length > 1 ? 's' : ''}`
+        : '';
+    }
+
+    if (!items.length) {
+      listEl.innerHTML = `
+        <div style="text-align:center; color:var(--text-muted); padding:32px 16px; font-size:13px;">
+          Aucun client avec tournée pour cette date / ces statuts.
+        </div>`;
+      return;
+    }
+
+    listEl.innerHTML = items.map(({ client, key, tours }) => {
+      const nbTours    = tours.length;
+      // Liste unique des chauffeurs concernés
+      const chauffeurs = Array.from(new Set(
+        tours.map(t => `${t._chauffeur.prenom || ''} ${t._chauffeur.nom || ''}`.trim())
+      )).filter(Boolean);
+      const chauffeursLabel = chauffeurs.length <= 3
+        ? chauffeurs.join(', ')
+        : `${chauffeurs.slice(0, 3).join(', ')}… (+${chauffeurs.length - 3})`;
+      const initials = (client.match(/\b\w/g) || ['?']).slice(0, 2).join('').toUpperCase();
+      // L'ID utilisé pour la sélection est la clé normalisée (insensible casse/accents)
+      const safeId = key.replace(/"/g, '&quot;');
+      return `
+        <label class="print-ch-item" data-id="${safeId}"
+               style="display:flex; align-items:center; gap:12px; padding:10px 12px;
+                      cursor:pointer; border-bottom:1px solid var(--border-light);
+                      transition: background .12s;"
+               onmouseenter="this.style.background='var(--surface)'"
+               onmouseleave="this.style.background=''">
+          <input type="checkbox" data-item-id="${safeId}" checked
+                 style="width:16px; height:16px; cursor:pointer; flex-shrink:0; accent-color: var(--text);" />
+          <div style="width:34px; height:34px; border-radius:8px;
+                      background: var(--text); color:#fff;
+                      display:flex; align-items:center; justify-content:center;
+                      font-size:11px; font-weight:700; flex-shrink:0;">
+            ${initials}
+          </div>
+          <div style="flex:1; min-width:0;">
+            <div style="font-weight:600; font-size:13.5px; color:var(--text);
+                        white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+              ${client}
+            </div>
+            <div style="font-size:11.5px; color:var(--text-muted); margin-top:1px;
+                        white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">
+              ${nbTours} tournée${nbTours>1?'s':''} · ${chauffeursLabel || '—'}
+            </div>
+          </div>
+        </label>
+      `;
+    }).join('');
+
+    bindRowClicks(listEl);
+  }
+
+  // Helper : clic n'importe où sur la ligne -> toggle la checkbox
+  function bindRowClicks(listEl) {
+    listEl.querySelectorAll('.print-ch-item').forEach(row => {
+      row.addEventListener('click', e => {
+        if (e.target.tagName !== 'INPUT') {
+          const cb = row.querySelector('input[type="checkbox"]');
+          if (cb) cb.checked = !cb.checked;
+        }
       });
     });
   }
@@ -420,7 +646,7 @@
   }
 
   // ─── Génération du PDF ───────────────────────────────────────────────────────
-  async function generatePDF(dateISO, selectedIds) {
+  async function generatePDF(dateISO, selectedIds, statuts, mode) {
     await ensurePdfLibsLoaded();
     const { jsPDF } = window.jspdf;
 
@@ -429,24 +655,47 @@
     const pageH = doc.internal.pageSize.getHeight();  // 297
     const margin = 12;
 
-    // Filtrer + ordonner les chauffeurs choisis (les tours sont déjà filtrés "planifie")
-    const items = getChauffeursAvecTournees(dateISO)
+    // On charge le logo (si défini) une seule fois pour tout le PDF
+    const logoData = await loadImageAsDataURL(CONFIG.logoUrl);
+
+    if (mode === 'client') {
+      // ── 1 page par client ───────────────────────────────────────────────
+      const items = getClientsAvecTournees(dateISO, statuts)
+        .filter(({ key }) => selectedIds.includes(key));
+
+      if (!items.length) {
+        notify('Aucune tournée à imprimer avec ces critères.', 'warning');
+        return;
+      }
+
+      const totalPages = items.length;
+      items.forEach(({ client, tours }, pageIdx) => {
+        if (pageIdx > 0) doc.addPage();
+        drawHeader(doc, pageW, margin, dateISO, logoData, 'FEUILLE PAR CLIENT');
+        const yAfterInfo = drawInfoBlockClient(doc, client, tours, margin, pageW);
+        drawToursTableForClient(doc, tours, yAfterInfo + 4, margin, pageW, pageH);
+        drawFooter(doc, pageW, pageH, margin, pageIdx + 1, totalPages);
+      });
+
+      const filename = `feuilles-par-client_${dateISO}.pdf`;
+      doc.save(filename);
+      notify(`PDF généré (${items.length} client${items.length > 1 ? 's' : ''}).`, 'success');
+      return;
+    }
+
+    // ── Mode par défaut : 1 page par chauffeur ────────────────────────────
+    const items = getChauffeursAvecTournees(dateISO, statuts)
       .filter(({ chauffeur }) => selectedIds.includes(String(chauffeur._id)));
 
     if (!items.length) {
-      notify('Aucune tournée planifiée à imprimer.', 'warning');
+      notify('Aucune tournée à imprimer avec ces critères.', 'warning');
       return;
     }
 
     const totalPages = items.length;
-
-    // On charge le logo (si défini) une seule fois pour tout le PDF
-    const logoData = await loadImageAsDataURL(CONFIG.logoUrl);
-
     items.forEach(({ chauffeur, tours }, pageIdx) => {
       if (pageIdx > 0) doc.addPage();
-
-      drawHeader(doc, pageW, margin, dateISO, logoData);
+      drawHeader(doc, pageW, margin, dateISO, logoData, 'FEUILLE DE TOURNÉE');
       const yAfterInfo = drawInfoBlock(doc, chauffeur, dateISO, tours, margin, pageW);
       drawToursTable(doc, tours, yAfterInfo + 4, margin, pageW, pageH);
       drawFooter(doc, pageW, pageH, margin, pageIdx + 1, totalPages);
@@ -454,11 +703,11 @@
 
     const filename = `feuilles-tournee_${dateISO}.pdf`;
     doc.save(filename);
-    notify(`PDF généré (${items.length} chauffeur${items.length>1?'s':''}).`, 'success');
+    notify(`PDF généré (${items.length} chauffeur${items.length > 1 ? 's' : ''}).`, 'success');
   }
 
   // ── En-tête : logo + brand + titre, version sobre noir/gris ──────────────────
-  function drawHeader(doc, pageW, margin, dateISO, logoData) {
+  function drawHeader(doc, pageW, margin, dateISO, logoData, title) {
     const baseY = margin;
     const logoSize = CONFIG.logoSize || 28;
 
@@ -474,7 +723,6 @@
     }
 
     // ── Bloc texte brand juste à droite du logo (centré verticalement) ──
-    // On centre les 2 lignes par rapport au logo (centre vertical = baseY + logoSize/2)
     const centerY = baseY + logoSize / 2;
     const textX = margin + logoSize + 6;
 
@@ -492,7 +740,7 @@
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(12.5);
     doc.setTextColor(26, 29, 35);
-    doc.text('FEUILLE DE TOURNÉE', pageW - margin, centerY - 0.5, { align: 'right' });
+    doc.text(title || 'FEUILLE DE TOURNÉE', pageW - margin, centerY - 0.5, { align: 'right' });
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(9.5);
@@ -594,12 +842,21 @@
       return tableStartY + 12;
     }
 
-    // Préparation des données — sans la colonne Statut
+    // Préparation des données — avec colonne Statut dédiée
     const body = tours.map((t, i) => {
       const num    = String(i + 1);
       const type   = t.type === 'regie' ? 'RÉGIE' : 'TOUR';
       const periode = (t.heurePeriode || 'journee').toUpperCase() === 'NUIT' ? 'NUIT' : 'JOUR';
       const typeCell = `${type}\n${periode}`;
+
+      // Cellule statut colorée
+      const statutKey   = t.statut || 'planifie';
+      const statutLabel = STATUT_LABELS_SHORT[statutKey] || statutKey;
+      const statutColor = STATUT_PDF_COLOR[statutKey]    || [26, 29, 35];
+      const statutCell  = {
+        content: statutLabel,
+        styles: { textColor: statutColor, fontStyle: 'bold' },
+      };
 
       const client = cleanText(t.client) || '—';
 
@@ -620,12 +877,12 @@
       if (notes) extras.push(`Note: ${notes}`);
       const extra = extras.join('\n');
 
-      return [num, typeCell, client, lieu, camion, extra];
+      return [num, typeCell, statutCell, client, lieu, camion, extra];
     });
 
     doc.autoTable({
       startY: tableStartY,
-      head: [['#', 'Type', "Donneur d'ordre ", 'Trajet / Chantier', 'Camion', 'Réf · Notes']],
+      head: [['#', 'Type', 'Statut', "Donneur d'ordre ", 'Trajet / Chantier', 'Camion', 'Réf · Notes']],
       body: body,
       margin: { left: margin, right: margin },
       styles: {
@@ -647,18 +904,174 @@
       alternateRowStyles: { fillColor: [250, 250, 251] },
       columnStyles: {
         0: { cellWidth: 8,  halign: 'center', fontStyle: 'bold' },
-        1: { cellWidth: 18, halign: 'center', fontStyle: 'bold', fontSize: 8 },
-        2: { cellWidth: 36, fontStyle: 'bold' },
-        3: { cellWidth: 'auto' },
-        4: { cellWidth: 24, halign: 'center', font: 'courier', fontSize: 9 },
-        5: { cellWidth: 42, fontSize: 8, textColor: [107, 114, 128] },
+        1: { cellWidth: 16, halign: 'center', fontStyle: 'bold', fontSize: 8 },
+        2: { cellWidth: 18, halign: 'center', fontSize: 8.5 },
+        3: { cellWidth: 32, fontStyle: 'bold' },
+        4: { cellWidth: 'auto' },
+        5: { cellWidth: 22, halign: 'center', font: 'courier', fontSize: 9 },
+        6: { cellWidth: 38, fontSize: 8, textColor: [107, 114, 128] },
       },
     });
 
     return doc.lastAutoTable.finalY;
   }
 
-  // ── Pied de page ──────────────────────────────────────────────────────────────
+  // ── Bloc info CLIENT (mode regroupement par client) ─────────────────────────
+  function drawInfoBlockClient(doc, clientName, tours, margin, pageW) {
+    const y0 = margin + (CONFIG.logoSize || 28) + 10;
+    const w = pageW - margin * 2;
+    const colW = w / 2;
+    const h = 16;
+
+    // Trait de séparation vertical entre les deux colonnes
+    doc.setDrawColor(230, 232, 236);
+    doc.setLineWidth(0.3);
+    doc.line(margin + colW, y0 + 1, margin + colW, y0 + h - 1);
+
+    // Labels
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(140, 144, 152);
+    doc.text('CLIENT', margin, y0 + 3);
+    doc.text('CHAUFFEUR(S)', margin + colW + 4, y0 + 3);
+
+    // Valeur client (peut être longue -> tronquer à la largeur)
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.setTextColor(26, 29, 35);
+    const clientLines = doc.splitTextToSize(cleanText(clientName) || '—', colW - 6);
+    doc.text(clientLines[0] || '—', margin, y0 + 9);
+
+    // Sous-info : nb tournées
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(120, 124, 132);
+    doc.text(`${tours.length} tournée${tours.length > 1 ? 's' : ''}`, margin, y0 + 14);
+
+    // Valeur chauffeur(s) : liste unique
+    const uniqueChauffeurs = Array.from(new Set(
+      tours.map(t => `${t._chauffeur?.prenom || ''} ${t._chauffeur?.nom || ''}`.trim())
+    )).filter(Boolean);
+    const chauffeurStr = uniqueChauffeurs.join(', ') || '—';
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.setTextColor(26, 29, 35);
+    const chLines = doc.splitTextToSize(chauffeurStr, colW - 6);
+    doc.text(chLines[0] || '—', margin + colW + 4, y0 + 9);
+    if (chLines.length > 1) {
+      doc.setFontSize(9);
+      doc.setFont('helvetica', 'normal');
+      doc.setTextColor(120, 124, 132);
+      doc.text(chLines.slice(1).join(' '), margin + colW + 4, y0 + 14);
+    } else {
+      // Sous-info : nombre de chauffeurs distincts
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(8);
+      doc.setTextColor(120, 124, 132);
+      doc.text(`${uniqueChauffeurs.length} chauffeur${uniqueChauffeurs.length > 1 ? 's' : ''}`,
+        margin + colW + 4, y0 + 14);
+    }
+
+    return y0 + h;
+  }
+
+  // ── Tableau des tournées en mode client (col Chauffeur à la place de l'ordre client) ──
+  function drawToursTableForClient(doc, tours, yStart, margin, pageW, pageH) {
+    // Titre de section
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(26, 29, 35);
+    doc.text(`TOURNÉES (${tours.length})`, margin, yStart + 4);
+
+    doc.setDrawColor(26, 29, 35);
+    doc.setLineWidth(0.4);
+    doc.line(margin, yStart + 5.5, pageW - margin, yStart + 5.5);
+
+    const tableStartY = yStart + 8;
+
+    if (!tours.length) {
+      doc.setFont('helvetica', 'italic');
+      doc.setFontSize(10);
+      doc.setTextColor(156, 163, 175);
+      doc.text('Aucune tournée à afficher.', margin, tableStartY + 8);
+      return tableStartY + 12;
+    }
+
+    const body = tours.map((t, i) => {
+      const num     = String(i + 1);
+      const type    = t.type === 'regie' ? 'RÉGIE' : 'TOUR';
+      const periode = (t.heurePeriode || 'journee').toUpperCase() === 'NUIT' ? 'NUIT' : 'JOUR';
+      const typeCell = `${type}\n${periode}`;
+
+      // Cellule statut colorée
+      const statutKey   = t.statut || 'planifie';
+      const statutLabel = STATUT_LABELS_SHORT[statutKey] || statutKey;
+      const statutColor = STATUT_PDF_COLOR[statutKey]    || [26, 29, 35];
+      const statutCell  = {
+        content: statutLabel,
+        styles: { textColor: statutColor, fontStyle: 'bold' },
+      };
+
+      const ch = t._chauffeur;
+      const chauffeurName = ch ? `${ch.prenom || ''} ${ch.nom || ''}`.trim() : '—';
+
+      let lieu;
+      if (t.type === 'regie') {
+        lieu = cleanText(t.lieuChantier) || '—';
+      } else {
+        const s = cleanText(t.source) || '—';
+        const d = cleanText(t.destination) || '—';
+        lieu = `${s}\n» ${d}`;
+      }
+
+      const camion = t.immatCamion || '—';
+      const ref    = t.refTransport || '';
+      const notes  = cleanText(t.notes);
+
+      const extras = [];
+      if (ref)   extras.push(`Réf: ${ref}`);
+      if (notes) extras.push(`Note: ${notes}`);
+      const extra = extras.join('\n');
+
+      return [num, typeCell, statutCell, chauffeurName, lieu, camion, extra];
+    });
+
+    doc.autoTable({
+      startY: tableStartY,
+      head: [['#', 'Type', 'Statut', 'Chauffeur', 'Trajet / Chantier', 'Camion', 'Réf · Notes']],
+      body: body,
+      margin: { left: margin, right: margin },
+      styles: {
+        font:        'helvetica',
+        fontSize:    9,
+        cellPadding: 2.8,
+        lineColor:   [220, 222, 228],
+        lineWidth:   0.2,
+        valign:      'top',
+        textColor:   [26, 29, 35],
+      },
+      headStyles: {
+        fillColor:   [26, 29, 35],
+        textColor:   [255, 255, 255],
+        fontStyle:   'bold',
+        fontSize:    8.5,
+        halign:      'left',
+      },
+      alternateRowStyles: { fillColor: [250, 250, 251] },
+      columnStyles: {
+        0: { cellWidth: 8,  halign: 'center', fontStyle: 'bold' },
+        1: { cellWidth: 16, halign: 'center', fontStyle: 'bold', fontSize: 8 },
+        2: { cellWidth: 18, halign: 'center', fontSize: 8.5 },
+        3: { cellWidth: 32, fontStyle: 'bold' },
+        4: { cellWidth: 'auto' },
+        5: { cellWidth: 22, halign: 'center', font: 'courier', fontSize: 9 },
+        6: { cellWidth: 38, fontSize: 8, textColor: [107, 114, 128] },
+      },
+    });
+
+    return doc.lastAutoTable.finalY;
+  }
   function drawFooter(doc, pageW, pageH, margin, pageNum, totalPages) {
     const y = pageH - 8;
     doc.setDrawColor(226, 228, 233);

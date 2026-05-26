@@ -19,7 +19,7 @@
   //   - soit avec une URL accessible :  '/img/logo-yovatrans.png' (même origine)
   // Tant que c'est null, un placeholder neutre est dessiné à la place.
   const CONFIG = {
-    logoUrl:      "/img/yov.png",
+    logoUrl:      "yov.png",
     logoSize:     28,    // taille du logo en mm (essaie 24 à 36 selon ton image)
     brandName:    'YOVATRANS',
     brandTagline: 'Transport & logistique',

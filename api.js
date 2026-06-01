@@ -16,21 +16,30 @@ async function apiFetch(path, options = {}) {
     ...(options.headers || {})
   };
 
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers,
-    credentials: "include"
-  });
+  let res;
+  try {
+    res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers,
+      credentials: "include"
+    });
+  } catch (networkErr) {
+    // Serveur injoignable / endormi / pas de connexion
+    const e = new Error("Serveur injoignable");
+    e.isNetwork = true;
+    throw e;
+  }
 
   const data = await res.json().catch(() => ({}));
 
   if (!res.ok) {
-    throw new Error(data.message || `API error ${res.status}`);
+    const e = new Error(data.message || `API error ${res.status}`);
+    e.status = res.status;   // on garde le code (401, 500, 503...)
+    throw e;
   }
 
   return data;
 }
-
 async function requireAuth() {
   const token = localStorage.getItem("token");
 
@@ -43,12 +52,16 @@ async function requireAuth() {
     await apiFetch("/auth/me");
     return true;
   } catch (error) {
-    localStorage.removeItem("token");
-    localStorage.removeItem("user");
-    sessionStorage.clear();
-
-    window.location.href = "login.html";
-    return false;
+    // On déconnecte UNIQUEMENT si le token est vraiment rejeté (401).
+    if (error.status === 401) {
+      localStorage.removeItem("token");
+      localStorage.removeItem("user");
+      sessionStorage.clear();
+      window.location.href = "login.html";
+      return false;
+    }
+    // Sinon (serveur endormi, réseau, erreur 500/503) → on reste connecté
+    return true;
   }
 }
 

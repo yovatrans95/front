@@ -1,17 +1,18 @@
 document.addEventListener('DOMContentLoaded', async () => {
   const token = localStorage.getItem('token');
-
-  // Très important :
-  // Si pas de token local, on reste sur la page login.
   if (!token) return;
 
   try {
     await apiFetch('/auth/me');
     window.location.replace('drivers.html');
-  } catch {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    sessionStorage.clear();
+  } catch (error) {
+    // On efface le token seulement si vraiment invalide (401)
+    if (error.status === 401) {
+      localStorage.removeItem('token');
+      localStorage.removeItem('user');
+      sessionStorage.clear();
+    }
+    // sinon on reste sur le login sans rien casser
   }
 });
 

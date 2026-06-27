@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="planning-import.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@300;400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="responsive.css">
 </head>
 <body>
 
@@ -16,71 +17,76 @@
 <div class="page-wrapper">
 
   <header class="planning-header">
-    <div class="header-left">
-      <h1 class="page-title">Planning</h1>
-      <div class="nav-week">
-        <button class="nav-btn" id="btnPrev">&#8249;</button>
-        <span class="week-label" id="weekLabel"></span>
-        <button class="nav-btn" id="btnNext">&#8250;</button>
-        <button class="nav-btn today-btn" id="btnToday">Aujourd'hui</button>
+
+    <!-- ── Niveau 1 : navigation · recherche · import / export ──────────────── -->
+    <div class="header-row header-row-top">
+      <div class="header-left">
+        <h1 class="page-title">Planning</h1>
+        <div class="nav-week">
+          <button class="nav-btn" id="btnPrev">&#8249;</button>
+          <span class="week-label" id="weekLabel"></span>
+          <button class="nav-btn" id="btnNext">&#8250;</button>
+          <button class="nav-btn today-btn" id="btnToday">Aujourd'hui</button>
+        </div>
+        <div class="view-range-btns">
+          <button class="view-range-btn" data-days="1">1j</button>
+          <button class="view-range-btn" data-days="2">2j</button>
+          <button class="view-range-btn" data-days="3">3j</button>
+          <button class="view-range-btn" data-days="4">4j</button>
+          <button class="view-range-btn" data-days="5">5j</button>
+          <button class="view-range-btn active" data-days="7">7j</button>
+        </div>
       </div>
-      <div class="view-range-btns">
-        <button class="view-range-btn" data-days="1">1j</button>
-        <button class="view-range-btn" data-days="2">2j</button>
-        <button class="view-range-btn" data-days="3">3j</button>
-        <button class="view-range-btn" data-days="4">4j</button>
-        <button class="view-range-btn" data-days="5">5j</button>
-        <button class="view-range-btn active" data-days="7">7j</button>
+
+      <div class="header-tools">
+        <div class="search-bar">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+          <input type="text" id="searchInput" placeholder="Chercher chauffeur, client, immat…" />
+          <button type="button" id="searchClear" class="search-clear" title="Effacer" aria-label="Effacer la recherche" style="display:none;">&times;</button>
+        </div>
+
+        <!-- Bouton Import PDF -->
+        <button id="importPanelToggle" class="nav-btn import-toggle-btn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+            <polyline points="14 2 14 8 20 8"/>
+            <line x1="12" y1="12" x2="12" y2="18"/>
+            <line x1="9" y1="15" x2="15" y2="15"/>
+          </svg>
+          Import PDF
+        </button>
+        <!-- Le bouton « Feuilles de tournée » (export PDF) est injecté ici par planning-print.js -->
+
+        <div class="edit-toggle">
+          <span class="toggle-label">Visualisation</span>
+          <label class="switch">
+            <input type="checkbox" id="editToggle" />
+            <span class="slider"></span>
+          </label>
+          <span class="toggle-label">Édition</span>
+        </div>
       </div>
     </div>
 
-    <div class="header-center">
-      <div class="search-bar">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-        <input type="text" id="searchInput" placeholder="Chercher chauffeur, client, immat…" />
-      </div>
-    </div>
-
-    <div class="header-right">
-
-      <!-- Bouton Import PDF -->
-      <button id="importPanelToggle" class="nav-btn import-toggle-btn">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-          <polyline points="14 2 14 8 20 8"/>
-          <line x1="12" y1="12" x2="12" y2="18"/>
-          <line x1="9" y1="15" x2="15" y2="15"/>
-        </svg>
-        Import PDF
-      </button>
-
+    <!-- ── Niveau 2 : filtres ──────────────────────────────────────────────── -->
+    <div class="header-row header-row-filters">
       <div class="filters">
-        <select id="filterStatut" class="filter-select">
-          <option value="">Tous les statuts</option>
-          <option value="planifie">Planifié</option>
-          <option value="annule">Annulé</option>
-          <option value="chute">Chute</option>
-          <option value="debord">Débord</option>
-          <option value="passage_vide">Passage à vide</option>
-          <option value="effectue">Effectué</option>
-        </select>
-        <select id="filterType" class="filter-select">
-          <option value="">Tour & Régie</option>
-          <option value="tour">Tour</option>
-          <option value="regie">Régie</option>
-        </select>
-        <select id="filterClient" class="filter-select">
-          <option value="">Tous les clients</option>
-        </select>
+        <span class="filters-label">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          Filtres
+        </span>
+        <!-- Filtres multi-sélection construits par planning.js -->
+        <div class="filter-multi" data-filter="statut"></div>
+        <div class="filter-multi" data-filter="type"></div>
+        <div class="filter-multi" data-filter="periode"></div>
+        <div class="filter-multi" data-filter="client"></div>
+        <div class="filter-multi" data-filter="source"></div>
+        <button type="button" id="btnResetFilters" class="filter-reset-btn" title="Réinitialiser tous les filtres">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v6h6"/><path d="M3 13a9 9 0 1 0 3-7.7L3 8"/></svg>
+          Réinitialiser
+        </button>
       </div>
-      <div class="edit-toggle">
-        <span class="toggle-label">Visualisation</span>
-        <label class="switch">
-          <input type="checkbox" id="editToggle" />
-          <span class="slider"></span>
-        </label>
-        <span class="toggle-label">Édition</span>
-      </div>
+      <span id="filterCount" class="filter-count"></span>
     </div>
   </header>
 
@@ -167,25 +173,33 @@
       <!-- Lieux Tour (source + destination) -->
       <div id="fieldsLieux">
         <div class="form-row">
-          <div class="form-group">
-            <label>Source (chargement)</label>
+          <div class="form-group" id="grpSource">
+            <label id="lblSource">Source (chargement)</label>
             <input type="text" id="fSource" placeholder="Lieu de chargement" />
           </div>
-          <div class="form-group">
-            <label>Destination (déchargement)</label>
+          <div class="form-group" id="grpDestination">
+            <label id="lblDestination">Destination (déchargement)</label>
             <input type="text" id="fDestination" placeholder="Lieu de déchargement" />
+          </div>
+          <!-- Régie : petit bouton bascule groupée <-> séparée, sur la même ligne -->
+          <button type="button" id="btnSeparerRegie" class="btn-separer-regie" style="display:none;" title="Séparer la régie : un départ/arrivée par tour">Séparer</button>
+        </div>
+      </div>
+
+      <!-- Nombre de tours effectués (Régie) -->
+      <div id="fieldNombreTours" style="display:none;">
+        <div class="form-row">
+          <div class="form-group full-width">
+            <label>Nombre de tours effectués</label>
+            <input type="number" id="fNombreTours" min="0" step="1" value="0" placeholder="0" />
           </div>
         </div>
       </div>
 
-      <!-- Lieu Régie (un seul champ) -->
-      <div id="fieldChantier" style="display:none;">
-        <div class="form-row">
-          <div class="form-group full-width">
-            <label>Lieu de chantier</label>
-            <input type="text" id="fChantier" placeholder="Adresse ou nom du chantier" />
-          </div>
-        </div>
+      <!-- Détail chargement / déchargement par tour (Régie) -->
+      <div id="fieldRegieTours" style="display:none;">
+        <div id="regieToursList"></div>
+        <button type="button" id="addRegieTourBtn" class="add-regie-tour-btn">+ Ajouter un tour</button>
       </div>
 
       <!-- Référence Dashdoc -->
@@ -228,6 +242,7 @@
 <script src="planning.js"></script>
 <script src="planning-import.js"></script>
 <script src="planning-print.js" ></script>
+<script src="planning-excel.js"></script>
 <script>
   // Sync radio heurePeriode -> hidden input fPeriode
   document.querySelectorAll('input[name="heurePeriode"]').forEach(r => {

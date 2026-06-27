@@ -10,6 +10,9 @@
     "seed:admin": "node src/seed/seedAdmin.js"
   },
   "dependencies": {
+    "@capacitor/android": "^8.3.4",
+    "@capacitor/cli": "^8.3.4",
+    "@capacitor/core": "^8.3.4",
     "bcryptjs": "^2.4.3",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",
@@ -23,5 +26,8 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.9"
-  }
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }

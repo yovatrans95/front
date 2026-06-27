@@ -8,6 +8,7 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
 <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@10.3.1/dist/gridstack.min.css">
 <style>
   :root{--bg:#f0f4ff;--white:#fff;--border:rgba(99,130,255,0.15);--border2:rgba(99,130,255,0.28);--blue-50:#eff3ff;--blue-100:#dce5ff;--blue-500:#4f72f5;--blue-600:#3a5ce4;--blue-700:#2a47cc;--navy:#1a2c6e;--text2:#4a5580;--muted:#8a95b8;--grad-main:linear-gradient(135deg,#4f72f5 0%,#7c4fe0 100%);--grad-hero:linear-gradient(160deg,#1e3a8a 0%,#3a5ce4 45%,#7c4fe0 100%);--shadow:0 4px 18px rgba(79,114,245,0.13);--shadow-lg:0 14px 44px rgba(79,114,245,0.2)}
   *{box-sizing:border-box;margin:0;padding:0}
@@ -33,6 +34,12 @@
   .btn-primary{background:var(--grad-main);color:#fff;box-shadow:0 4px 16px rgba(79,114,245,0.38)}
   .btn-soft{background:var(--white);color:var(--blue-700);border:1px solid var(--border);box-shadow:var(--shadow)}
   .layout{display:grid;grid-template-columns:360px minmax(0,1fr);gap:18px;height:calc(100vh - 124px)}
+  .left-col{display:flex;flex-direction:column;gap:18px;min-height:0}
+  .left-col>.panel{display:flex;flex-direction:column;min-height:0}
+  .left-col>.panel:first-child{flex:3 1 0}
+  .left-col>.panel.volatile-panel{flex:2 1 0}
+  .volatile-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .volatile-title{font-weight:800;font-size:.9rem;color:var(--navy)}
   .panel{background:var(--white);border:1px solid var(--border);border-radius:20px;box-shadow:var(--shadow);overflow:hidden;min-height:0}
   .panel-head{padding:16px;border-bottom:1px solid var(--border);background:linear-gradient(90deg,var(--blue-50),rgba(238,232,255,.45))}
   .search{width:100%;border:1.5px solid var(--border);border-radius:12px;padding:11px 13px;font:0.875rem 'Plus Jakarta Sans',sans-serif;color:var(--navy);outline:none}
@@ -40,7 +47,9 @@
   .stat{background:#fff;border:1px solid var(--border);border-radius:14px;padding:10px}
   .stat-label{font-size:.63rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:800}
   .stat-value{font-size:1.35rem;font-weight:800;color:var(--navy)}
-  .list{height:calc(100% - 132px);overflow:auto;padding:10px}
+  .list{flex:1 1 auto;min-height:0;overflow:auto;padding:10px}
+  .fleet-back{display:inline-flex;align-items:center;gap:6px;margin-bottom:12px;padding:8px 12px;border:1px solid var(--border);border-radius:12px;background:var(--blue-50);color:var(--blue-700);font-weight:800;font-size:.78rem;cursor:pointer;transition:background .15s,border-color .15s}
+  .fleet-back:hover{background:var(--blue-100);border-color:var(--border2)}
   .vehicle-card{border:1px solid var(--border);border-radius:16px;padding:12px;margin-bottom:10px;cursor:pointer;background:#fff;transition:.18s}
   .vehicle-card:hover,.vehicle-card.active{border-color:var(--border2);box-shadow:var(--shadow);transform:translateY(-1px)}
   .vehicle-top{display:flex;justify-content:space-between;gap:10px}
@@ -53,9 +62,68 @@
   .red{background:rgba(239,68,68,.1);color:#dc2626}
   .meta{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px;font-size:.73rem;color:var(--text2)}
   .meta strong{display:block;color:var(--navy);font-size:.82rem}
+  .tour-detail{margin-top:10px;border-top:1px dashed var(--border2);padding-top:10px;display:flex;flex-direction:column;gap:8px}
+  .tour-detail.empty{color:var(--muted);font-size:.72rem;font-weight:700;padding-top:10px;border-top:1px dashed var(--border2)}
+  .tour-row{background:var(--blue-50);border:1px solid var(--border);border-radius:12px;padding:8px 10px;cursor:pointer;transition:background .15s,border-color .15s}
+  .tour-row:hover{background:#fff;border-color:var(--blue-500)}
+  .tour-row-top{display:flex;align-items:center;gap:7px;margin-bottom:4px}
+  .tour-dot{width:8px;height:8px;border-radius:50%;background:var(--muted);flex-shrink:0}
+  .tour-dot.st-effectue{background:#10b981}
+  .tour-dot.st-planifie{background:#4f72f5}
+  .tour-dot.st-annule{background:#dc2626}
+  .tour-dot.st-chute,.tour-dot.st-debord,.tour-dot.st-passage_vide{background:#f59e0b}
+  .tour-client{font-weight:800;color:var(--navy);font-size:.78rem;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .tour-time{font-weight:700;color:var(--muted);font-size:.7rem;flex-shrink:0}
+  .tour-lieux{font-size:.73rem;color:var(--text2);font-weight:600;line-height:1.4}
+  .tour-arrow{color:var(--blue-500);font-weight:800;padding:0 2px}
+  .site-pin{width:30px;height:30px;position:relative;display:flex;align-items:center;justify-content:center;border-radius:50% 50% 50% 0;transform:rotate(-45deg);border:2px solid #fff;box-shadow:0 3px 8px rgba(20,40,90,.35)}
+  .site-pin span{transform:rotate(45deg);color:#fff;font:900 .82rem/1 system-ui,sans-serif}
+  .site-pin.start{background:#10b981}
+  .site-pin.end{background:#7c4fe0}
   .map-wrap{position:relative}
-  .map{width:100%;height:100%;min-height:500px}
+  .map{width:100%;height:100%;min-height:0}
+
+  /* ── Dashboard Gridstack ──────────────────────────────────────────────── */
+  .dash-toolbar{display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap}
+  .dash-hint{font-size:.72rem;color:var(--muted);font-weight:700}
+  .btn-soft.on{background:var(--grad-main);color:#fff;border:none}
+  .grid-stack{background:transparent}
+  /* Le contenu d'un widget porte le look .panel et remplit la tuile. */
+  .grid-stack-item-content{inset:0;display:flex;flex-direction:column;overflow:hidden}
+  .grid-stack-item-content.panel{padding:0}
+  .drag-handle{cursor:move}
+  /* Poignée de déplacement : grille de points (pas d'emoji) */
+  .widget-grip{display:inline-block;width:20px;height:12px;background-image:radial-gradient(var(--muted) 1.3px,transparent 1.5px);background-size:6px 6px;opacity:.6;user-select:none}
+  .panel-head .widget-grip{margin-bottom:8px}
+  .map-grip{position:absolute;z-index:701;right:12px;top:12px;width:34px;height:26px;background-color:#fff;background-position:center;border:1px solid var(--border);box-shadow:var(--shadow);border-radius:10px}
+  .kpi-tile{align-items:flex-start;justify-content:center;padding:12px 16px;gap:2px}
+  .kpi-tile .stat-value{font-size:1.6rem;font-weight:800;color:var(--navy)}
+  .kpi-tile .stat-label{font-size:.62rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);font-weight:800}
+  /* Repère personnalisé posé sur la carte */
+  .map-pin{display:flex;align-items:center;gap:6px;background:#1a2c6e;color:#fff;border:2px solid #fff;border-radius:999px;padding:3px 10px 3px 8px;font:800 .72rem 'Plus Jakarta Sans',sans-serif;white-space:nowrap;box-shadow:0 3px 9px rgba(20,40,90,.4)}
+  .map-pin::before{content:'';flex:0 0 auto;width:7px;height:7px;border-radius:50%;background:#fff}
+  /* Édition inline du repère dans le popup (remplace le prompt natif) */
+  .pin-edit{display:flex;flex-direction:column;gap:8px;min-width:180px}
+  .pin-input{border:1.5px solid var(--border);border-radius:10px;padding:9px 11px;font:600 .82rem 'Plus Jakarta Sans',sans-serif;color:var(--navy);outline:none}
+  .pin-input:focus{border-color:var(--blue-500)}
+  .pin-edit-actions{display:flex;gap:8px}
+  .pin-edit-actions .yova-popup-btn{flex:1;cursor:pointer}
+  /* Menu contextuel (clic droit) */
+  .ctx-menu{position:fixed;z-index:2000;min-width:200px;background:#fff;border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-lg);padding:6px;overflow:hidden}
+  .ctx-item{display:block;width:100%;text-align:left;border:none;background:none;cursor:pointer;padding:9px 12px;border-radius:9px;font:600 .82rem 'Plus Jakarta Sans',sans-serif;color:var(--navy)}
+  .ctx-item:hover{background:var(--blue-50)}
+  .ctx-sep{height:1px;background:var(--border);margin:5px 8px}
   .loading{position:absolute;z-index:700;right:16px;top:16px;background:#fff;border:1px solid var(--border);box-shadow:var(--shadow);border-radius:12px;padding:10px 14px;font-size:.8rem;color:var(--text2);font-weight:700}
+
+  /* Contrôle stations-service sur la carte */
+  .station-ctrl{position:absolute;z-index:700;left:52px;top:12px;display:flex;gap:6px;align-items:center}
+  .station-toggle{border:1px solid var(--border);background:#fff;color:var(--blue-700);box-shadow:var(--shadow);border-radius:12px;padding:9px 13px;font:800 .8rem 'Plus Jakarta Sans',sans-serif;cursor:pointer;transition:.15s;white-space:nowrap}
+  .station-toggle:hover{border-color:var(--border2)}
+  .station-toggle.on{background:var(--grad-main);color:#fff;border:none}
+  .station-fuel{border:1px solid var(--border);background:#fff;color:var(--navy);box-shadow:var(--shadow);border-radius:12px;padding:9px 11px;font:800 .8rem 'Plus Jakarta Sans',sans-serif;cursor:pointer;outline:none}
+  /* Pastille prix carburant */
+  .fuel-pin{display:flex;align-items:center;justify-content:center;background:#fff;border:2px solid #fff;border-radius:999px;padding:2px 9px;box-shadow:0 3px 9px rgba(20,40,90,.3);font:900 .7rem 'Plus Jakarta Sans',sans-serif;white-space:nowrap;color:#fff}
+  .fuel-pin.no-price{background:#8a95b8;color:#fff}
 
   /* --- Yovatrans custom popup and marker styles --- */
   .leaflet-popup-content-wrapper{
@@ -198,28 +266,83 @@
   position:relative;
   width:54px;
   height:54px;
-  border-radius:18px;
-  background:#fff;
-  border:3px solid #fff;
-  box-shadow:0 10px 26px rgba(30,58,138,.28);
   display:flex;
   align-items:center;
   justify-content:center;
 }
 
-.truck-marker img{
-  width:38px;
-  height:38px;
-  object-fit:contain;
+.truck-dot{
+  width:30px;
+  height:30px;
+  border-radius:50%;
+  background:#1a2c6e;
+  border:3px solid #fff;
+  box-shadow:0 4px 12px rgba(30,58,138,.45);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:#fff;
+  font:900 .72rem 'Plus Jakarta Sans',sans-serif;
+  letter-spacing:-.02em;
 }
 
-.truck-marker.moving{
-  box-shadow:0 0 0 6px rgba(16,185,129,.15),0 10px 26px rgba(30,58,138,.28);
+.truck-dir{
+  position:absolute;
+  top:50%;
+  left:50%;
+  width:0;
+  height:0;
+  z-index:3;
+  pointer-events:none;
 }
 
-.truck-marker.off{
-  opacity:.75;
-  filter:grayscale(.7);
+/* Bras radial : part du centre du point et s'étend vers l'extérieur dans le sens du cap. */
+.dir-arm{
+  position:absolute;
+  left:0;
+  top:0;
+  width:26px;
+  height:26px;
+  transform:translate(-50%,-100%) translateY(-9px);
+}
+
+.dir-arrow{
+  position:absolute;
+  inset:0;
+  display:block;
+  filter:drop-shadow(0 2px 3px rgba(26,44,110,.4));
+}
+
+.dir-speed{
+  position:absolute;
+  left:100%;
+  top:50%;
+  margin-left:-8px;
+  background:#1a2c6e;
+  color:#fff;
+  border:2px solid #fff;
+  border-radius:999px;
+  min-width:18px;
+  height:16px;
+  padding:0 6px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font:900 .58rem 'Plus Jakarta Sans',sans-serif;
+  box-shadow:0 3px 8px rgba(26,44,110,.35);
+}
+
+.truck-marker.moving .truck-dot{
+  background:#10b981;
+  box-shadow:0 0 0 5px rgba(16,185,129,.18),0 4px 12px rgba(16,185,129,.4);
+}
+
+.truck-marker.off .truck-dot{
+  background:#8a95b8;
+}
+
+.truck-marker.selected .truck-dot{
+  box-shadow:0 0 0 5px rgba(79,114,245,.3),0 4px 12px rgba(30,58,138,.45);
 }
 
 .speed-bubble{
@@ -248,16 +371,20 @@
     50%{transform:scale(1.06)}
   }
 
+
+
+
+
   @media(max-width:1000px){
     .main{margin-left:0;padding:20px}
-    .layout{grid-template-columns:1fr;height:auto}
-    .panel{min-height:420px}
     .sidebar{display:none}
+    .kpi-tile{min-height:0}
     .map{height:600px}
     .page-header{flex-direction:column}
     .actions{display:flex;gap:8px;flex-wrap:wrap}
   }
 </style>
+<link rel="stylesheet" href="responsive.css">
 </head>
 <body>
 <div id="sidebar-mount"></div>
@@ -272,28 +399,77 @@
       <a class="btn btn-primary" href="vehicules.html">Retour véhicules</a>
     </div>
   </div>
-  <div class="layout">
-    <aside class="panel">
-      <div class="panel-head">
-        <input class="search" id="searchInput" placeholder="Rechercher immat, camion, adresse...">
-        <div class="stats">
-          <div class="stat"><div class="stat-label">Total</div><div class="stat-value" id="statTotal">—</div></div>
-          <div class="stat"><div class="stat-label">En mouvement</div><div class="stat-value" id="statMoving">—</div></div>
-          <div class="stat"><div class="stat-label">Liés Mongo</div><div class="stat-value" id="statLinked">—</div></div>
-        </div>
+  <div class="dash-toolbar">
+    <button class="btn btn-soft" id="addPinBtn" type="button">Poser un repère</button>
+    <button class="btn btn-soft" id="resetLayoutBtn" type="button">Réinitialiser la disposition</button>
+    <span class="dash-hint">Glisse par la poignée pour déplacer, tire les bords pour redimensionner · clic droit pour les actions</span>
+  </div>
+  <div class="grid-stack">
+
+    <div class="grid-stack-item" gs-id="kpiTotal" gs-x="0" gs-y="0" gs-w="2" gs-h="1">
+      <div class="grid-stack-item-content panel kpi-tile drag-handle">
+        <div class="stat-label">Total</div><div class="stat-value" id="statTotal">—</div>
       </div>
-      <div class="list" id="vehicleList"></div>
-    </aside>
-    <section class="panel map-wrap">
-      <div id="loading" class="loading">Chargement flotte...</div>
-      <div id="map" class="map"></div>
-    </section>
+    </div>
+    <div class="grid-stack-item" gs-id="kpiMoving" gs-x="2" gs-y="0" gs-w="2" gs-h="1">
+      <div class="grid-stack-item-content panel kpi-tile drag-handle">
+        <div class="stat-label">En mouvement</div><div class="stat-value" id="statMoving">—</div>
+      </div>
+    </div>
+    <div class="grid-stack-item" gs-id="kpiLinked" gs-x="4" gs-y="0" gs-w="2" gs-h="1">
+      <div class="grid-stack-item-content panel kpi-tile drag-handle">
+        <div class="stat-label">Liés Mongo</div><div class="stat-value" id="statLinked">—</div>
+      </div>
+    </div>
+
+    <div class="grid-stack-item" gs-id="list" gs-x="0" gs-y="1" gs-w="6" gs-h="5">
+      <div class="grid-stack-item-content panel">
+        <div class="panel-head drag-handle">
+          <span class="widget-grip" aria-hidden="true"></span>
+          <input class="search" id="searchInput" placeholder="Rechercher immat, camion, adresse, lieu...">
+        </div>
+        <div class="list" id="vehicleList"></div>
+      </div>
+    </div>
+
+    <div class="grid-stack-item" gs-id="volee" gs-x="0" gs-y="6" gs-w="6" gs-h="3">
+      <div class="grid-stack-item-content panel volatile-panel">
+        <div class="panel-head volatile-head drag-handle">
+          <span class="widget-grip" aria-hidden="true"></span>
+          <span class="volatile-title">Tours à la volée</span>
+          <span class="badge blue" id="volatileCount">0</span>
+        </div>
+        <div class="list" id="volatileList"></div>
+      </div>
+    </div>
+
+    <div class="grid-stack-item" gs-id="map" gs-x="6" gs-y="0" gs-w="6" gs-h="9">
+      <div class="grid-stack-item-content panel map-wrap">
+        <span class="widget-grip map-grip drag-handle" title="Déplacer la carte" aria-hidden="true"></span>
+        <div id="loading" class="loading">Chargement flotte...</div>
+        <div id="stationCtrl" class="station-ctrl">
+          <button id="stationsToggle" class="station-toggle" type="button">Stations</button>
+          <select id="stationFuel" class="station-fuel" hidden>
+            <option value="gazole">Gazole</option>
+            <option value="sp95">SP95</option>
+            <option value="sp98">SP98</option>
+            <option value="e10">E10</option>
+            <option value="e85">E85</option>
+            <option value="gplc">GPLc</option>
+          </select>
+        </div>
+        <div id="map" class="map"></div>
+      </div>
+    </div>
+
   </div>
 </main>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/gridstack@10.3.1/dist/gridstack-all.min.js"></script>
 <script src="api.js"></script>
 <script src="sidebar.js" data-page="tracking"></script>
+
 <script src="tracking.js"></script>
 </body>
 </html>

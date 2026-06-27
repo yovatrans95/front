@@ -150,6 +150,15 @@
     });
   }
 
+  // Filtres additionnels (type tour/régie, période jour/nuit) partagés par le
+  // panneau d'export. null = pas de filtre. Réglés avant chaque génération/liste.
+  let exportFilter = { types: null, periodes: null };
+  function passesExtra(t) {
+    if (exportFilter.types && exportFilter.types.length && !exportFilter.types.includes(t.type)) return false;
+    if (exportFilter.periodes && exportFilter.periodes.length && !exportFilter.periodes.includes(t.heurePeriode || 'journee')) return false;
+    return true;
+  }
+
   // Renvoie tous les chauffeurs ayant au moins une tournée à la date donnée
   // dont le statut est dans `statuts` (tableau, ex: ['planifie','effectue']).
   // Si statuts est absent ou vide, on retombe sur ['planifie'] (comportement historique).
@@ -164,7 +173,7 @@
             && p.date === dateISO
           );
       if (!planning || !planning.tours) return;
-      const tours = planning.tours.filter(t => allowed.includes(t.statut));
+      const tours = planning.tours.filter(t => allowed.includes(t.statut) && passesExtra(t));
       if (tours.length > 0) {
         chs.push({ chauffeur: ch, tours: tours });
       }
@@ -206,7 +215,7 @@
           );
       if (!planning || !planning.tours) return;
       planning.tours.forEach(t => {
-        if (!allowed.includes(t.statut)) return;
+        if (!allowed.includes(t.statut) || !passesExtra(t)) return;
         const rawName = (t.client || '').trim() || '(Sans client)';
         const key     = normalizeClientKey(rawName) || '(sans client)';
         if (!byKey.has(key)) {
@@ -242,183 +251,219 @@
     return entries.map(e => e[0]).join(' / ');
   }
 
-  // ─── Modal de configuration ──────────────────────────────────────────────────
+  // ─── Panneau latéral d'export (PDF feuille de tournée OU Excel) ───────────────
   function buildPrintModal() {
-    // Supprimer une instance existante
     document.getElementById('printSheetModal')?.remove();
 
-    // Date par défaut = première date de la vue actuelle, sinon aujourd'hui
     const defaultDateISO = state.currentDate
       || (state.viewStart ? toISO(state.viewStart) : toISO(new Date()));
+    const days = (typeof getViewDays === 'function') ? getViewDays() : [];
+    const defFrom = days.length ? toISO(days[0]) : defaultDateISO;
+    const defTo   = days.length ? toISO(days[days.length - 1]) : defaultDateISO;
+
+    const lbl = 'font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:600; margin-bottom:8px; display:block;';
+    const chip = 'display:inline-flex; align-items:center; gap:6px; padding:5px 10px; border:1px solid var(--border); border-radius:6px; background:var(--bg); cursor:pointer; font-size:12.5px;';
 
     const overlay = document.createElement('div');
-    overlay.className = 'modal-overlay';
+    overlay.className = 'export-drawer-overlay';
     overlay.id = 'printSheetModal';
-    overlay.style.display = 'flex';
     overlay.innerHTML = `
-      <div class="modal" style="max-width: 600px;">
-        <div class="modal-header">
-          <h2 class="modal-title">Feuilles de tournée</h2>
+      <div class="export-drawer" role="dialog" aria-label="Exporter le planning">
+        <div class="export-drawer-head">
+          <h2 class="modal-title" style="margin:0;">Exporter le planning</h2>
           <button class="modal-close" id="printModalClose">&times;</button>
         </div>
 
-        <div class="modal-body" style="padding-top: 8px;">
+        <div class="export-drawer-body">
 
-          <!-- Section 1 : date -->
-          <div class="form-row" style="margin-bottom: 18px;">
-            <div class="form-group full-width">
-              <label style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:600;">
-                Date
-              </label>
-              <input type="date" id="printDate" value="${defaultDateISO}"
-                     style="font-size:15px; font-weight:600;" />
+          <!-- Format -->
+          <div style="margin-bottom:18px;">
+            <label style="${lbl}">Format</label>
+            <div class="export-format-toggle">
+              <label><input type="radio" name="exportFormat" value="pdf" checked /> <span>Feuille de tournée (PDF)</span></label>
+              <label><input type="radio" name="exportFormat" value="excel" /> <span>Excel (.xlsx)</span></label>
             </div>
           </div>
 
-          <!-- Section 2 : statuts à inclure -->
-          <div class="form-row" style="margin-bottom: 16px;">
-            <div class="form-group full-width">
-              <label style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:600; margin-bottom:8px; display:block;">
-                Statuts à inclure
-              </label>
-              <div id="printStatutsList" style="display:flex; flex-wrap:wrap; gap:6px 10px;">
-                ${Object.entries(STATUT_LABELS).map(([key, label]) => `
-                  <label style="display:inline-flex; align-items:center; gap:6px; padding:5px 10px;
-                                border:1px solid var(--border); border-radius:6px;
-                                background:var(--bg); cursor:pointer; font-size:12.5px;">
-                    <input type="checkbox" data-statut="${key}" ${key === 'planifie' ? 'checked' : ''}
-                           style="width:14px; height:14px; cursor:pointer; accent-color: var(--text);" />
-                    ${label}
-                  </label>
-                `).join('')}
+          <!-- Période : 1 date (PDF) ou plage (Excel) -->
+          <div id="exportDatePdf" style="margin-bottom:18px;">
+            <label style="${lbl}">Date</label>
+            <input type="date" id="printDate" value="${defaultDateISO}" style="font-size:15px; font-weight:600;" />
+          </div>
+          <div id="exportDateExcel" style="margin-bottom:18px; display:none;">
+            <label style="${lbl}">Période</label>
+            <div style="display:flex; gap:10px; align-items:center;">
+              <input type="date" id="exportFrom" value="${defFrom}" style="font-size:14px;" />
+              <span style="color:var(--text-muted); font-size:13px;">au</span>
+              <input type="date" id="exportTo" value="${defTo}" style="font-size:14px;" />
+            </div>
+          </div>
+
+          <!-- Statuts -->
+          <div style="margin-bottom:16px;">
+            <label style="${lbl}">Statuts à inclure</label>
+            <div id="printStatutsList" style="display:flex; flex-wrap:wrap; gap:6px 10px;">
+              ${Object.entries(STATUT_LABELS).map(([key, label]) => `
+                <label style="${chip}">
+                  <input type="checkbox" data-statut="${key}" ${key === 'planifie' ? 'checked' : ''}
+                         style="width:14px; height:14px; cursor:pointer; accent-color: var(--text);" />
+                  ${label}
+                </label>`).join('')}
+            </div>
+          </div>
+
+          <!-- Type + Période (jour/nuit) -->
+          <div style="display:flex; gap:24px; flex-wrap:wrap; margin-bottom:16px;">
+            <div>
+              <label style="${lbl}">Type</label>
+              <div id="exportTypeList" style="display:flex; gap:8px;">
+                <label style="${chip}"><input type="checkbox" data-type="tour" checked style="width:14px;height:14px;accent-color:var(--text);" /> Tour</label>
+                <label style="${chip}"><input type="checkbox" data-type="regie" checked style="width:14px;height:14px;accent-color:var(--text);" /> Régie</label>
+              </div>
+            </div>
+            <div>
+              <label style="${lbl}">Période</label>
+              <div id="exportPeriodeList" style="display:flex; gap:8px;">
+                <label style="${chip}"><input type="checkbox" data-periode="journee" checked style="width:14px;height:14px;accent-color:var(--text);" /> Jour</label>
+                <label style="${chip}"><input type="checkbox" data-periode="nuit" checked style="width:14px;height:14px;accent-color:var(--text);" /> Nuit</label>
               </div>
             </div>
           </div>
 
-          <!-- Section 3 : regroupement -->
-          <div class="form-row" style="margin-bottom: 16px;">
-            <div class="form-group full-width">
-              <label style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:600; margin-bottom:8px; display:block;">
-                Regroupement (1 page par...)
+          <!-- Regroupement (PDF uniquement) -->
+          <div id="exportGroupSection" style="margin-bottom:16px;">
+            <label style="${lbl}">Regroupement / filtre</label>
+            <div style="display:flex; gap:18px;">
+              <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+                <input type="radio" name="printGroupMode" value="chauffeur" checked style="width:15px; height:15px; accent-color: var(--text);" /> Chauffeur
               </label>
-              <div style="display:flex; gap:18px;">
-                <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
-                  <input type="radio" name="printGroupMode" value="chauffeur" checked
-                         style="width:15px; height:15px; cursor:pointer; accent-color: var(--text);" />
-                  Chauffeur
-                </label>
-                <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
-                  <input type="radio" name="printGroupMode" value="client"
-                         style="width:15px; height:15px; cursor:pointer; accent-color: var(--text);" />
-                  Client
-                </label>
-              </div>
+              <label style="display:inline-flex; align-items:center; gap:6px; cursor:pointer; font-size:13px;">
+                <input type="radio" name="printGroupMode" value="client" style="width:15px; height:15px; accent-color: var(--text);" /> Client
+              </label>
             </div>
           </div>
 
-          <!-- Section 4 : sélection (chauffeurs ou clients selon le mode) -->
-          <div class="form-row" style="margin-bottom: 14px;">
-            <div class="form-group full-width">
-              <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
-                <label style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:600; margin:0;">
-                  <span id="printListLabel">Chauffeurs</span> <span id="printChauffeurCount" style="color:var(--text-subtle); font-weight:500;"></span>
-                </label>
-                <div style="display:flex; gap:4px;">
-                  <button type="button" id="printSelectAll"
-                          style="padding:3px 9px; font-size:11px; background:transparent; border:1px solid var(--border); border-radius:5px; color:var(--text-muted); cursor:pointer; font-family:inherit;">
-                    Tout cocher
-                  </button>
-                  <button type="button" id="printSelectNone"
-                          style="padding:3px 9px; font-size:11px; background:transparent; border:1px solid var(--border); border-radius:5px; color:var(--text-muted); cursor:pointer; font-family:inherit;">
-                    Tout décocher
-                  </button>
-                </div>
+          <!-- Sélection (PDF uniquement) -->
+          <div id="exportSelectionSection" style="margin-bottom:6px;">
+            <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px;">
+              <label style="font-size:11px; text-transform:uppercase; letter-spacing:.06em; color:var(--text-muted); font-weight:600; margin:0;">
+                <span id="printListLabel">Chauffeurs</span> <span id="printChauffeurCount" style="color:var(--text-subtle); font-weight:500;"></span>
+              </label>
+              <div style="display:flex; gap:4px;">
+                <button type="button" id="printSelectAll" style="padding:3px 9px; font-size:11px; background:transparent; border:1px solid var(--border); border-radius:5px; color:var(--text-muted); cursor:pointer; font-family:inherit;">Tout cocher</button>
+                <button type="button" id="printSelectNone" style="padding:3px 9px; font-size:11px; background:transparent; border:1px solid var(--border); border-radius:5px; color:var(--text-muted); cursor:pointer; font-family:inherit;">Tout décocher</button>
               </div>
-
-              <div id="printChauffeurList"
-                   style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border);
-                          border-radius: var(--radius); background: var(--bg);">
-                <div style="text-align:center; color:var(--text-muted); padding:24px; font-size:13px;">
-                  Sélectionne une date pour voir la liste.
-                </div>
-              </div>
+            </div>
+            <div id="printChauffeurList" style="max-height: 280px; overflow-y: auto; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg);">
+              <div style="text-align:center; color:var(--text-muted); padding:24px; font-size:13px;">Chargement…</div>
             </div>
           </div>
 
         </div>
 
-        <div class="modal-footer">
+        <div class="export-drawer-foot">
           <button class="btn btn-ghost"   id="printModalCancel">Annuler</button>
           <button class="btn btn-primary" id="printModalGenerate">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                  stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px; margin-right:6px;">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-              <polyline points="7 10 12 15 17 10"/>
-              <line x1="12" y1="15" x2="12" y2="3"/>
+              <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
-            Télécharger le PDF
+            <span id="printGenerateLabel">Télécharger le PDF</span>
           </button>
         </div>
       </div>
     `;
     document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('open'));
 
     // ── Listeners ─────────────────────────────────────────────────────────────
-    const close = () => overlay.remove();
+    const close = () => { overlay.classList.remove('open'); setTimeout(() => overlay.remove(), 200); };
     document.getElementById('printModalClose').addEventListener('click', close);
     document.getElementById('printModalCancel').addEventListener('click', close);
     overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
 
-    const dateInput = document.getElementById('printDate');
-    dateInput.addEventListener('change', () => refreshList());
+    // Bascule format -> affiche le bon sélecteur de date + relibelle le bouton
+    function applyFormat() {
+      const fmt = getSelectedFormat();
+      document.getElementById('exportDatePdf').style.display   = fmt === 'pdf' ? '' : 'none';
+      document.getElementById('exportDateExcel').style.display = fmt === 'excel' ? '' : 'none';
+      // Le regroupement/sélection chauffeur·client ne concerne que le PDF.
+      // L'Excel exporte tout selon date + statuts + type + période.
+      document.getElementById('exportGroupSection').style.display     = fmt === 'pdf' ? '' : 'none';
+      document.getElementById('exportSelectionSection').style.display = fmt === 'pdf' ? '' : 'none';
+      document.getElementById('printGenerateLabel').textContent = fmt === 'excel' ? 'Télécharger l\'Excel' : 'Télécharger le PDF';
+      if (fmt === 'pdf') refreshList();
+    }
+    document.querySelectorAll('input[name="exportFormat"]').forEach(r => r.addEventListener('change', applyFormat));
 
-    // Cocher/décocher un statut -> rafraîchir la liste pour refléter qui apparaît
-    document.querySelectorAll('#printStatutsList input[type="checkbox"]').forEach(cb => {
-      cb.addEventListener('change', () => refreshList());
-    });
+    ['printDate', 'exportFrom', 'exportTo'].forEach(id =>
+      document.getElementById(id)?.addEventListener('change', () => refreshList()));
+    document.querySelectorAll('#printStatutsList input, #exportTypeList input, #exportPeriodeList input, input[name="printGroupMode"]')
+      .forEach(cb => cb.addEventListener('change', () => refreshList()));
 
-    // Changer de mode (chauffeur <-> client) -> rafraîchir la liste
-    document.querySelectorAll('input[name="printGroupMode"]').forEach(r => {
-      r.addEventListener('change', () => refreshList());
-    });
-
-    document.getElementById('printSelectAll').addEventListener('click', () => {
-      document.querySelectorAll('#printChauffeurList input[type="checkbox"]').forEach(cb => cb.checked = true);
-    });
-    document.getElementById('printSelectNone').addEventListener('click', () => {
-      document.querySelectorAll('#printChauffeurList input[type="checkbox"]').forEach(cb => cb.checked = false);
-    });
+    document.getElementById('printSelectAll').addEventListener('click', () =>
+      document.querySelectorAll('#printChauffeurList input[type="checkbox"]').forEach(cb => cb.checked = true));
+    document.getElementById('printSelectNone').addEventListener('click', () =>
+      document.querySelectorAll('#printChauffeurList input[type="checkbox"]').forEach(cb => cb.checked = false));
 
     document.getElementById('printModalGenerate').addEventListener('click', async () => {
-      const dateISO = dateInput.value;
-      if (!dateISO) { notify('Choisis une date.', 'warning'); return; }
-
+      const fmt = getSelectedFormat();
       const statuts = getSelectedStatuts();
-      if (!statuts.length) { notify('Sélectionne au moins un statut à inclure.', 'warning'); return; }
+      if (!statuts.length) { notify('Sélectionne au moins un statut.', 'warning'); return; }
 
-      const mode = getSelectedGroupMode();
-
-      const checked = Array.from(document.querySelectorAll('#printChauffeurList input[type="checkbox"]:checked'))
-        .map(cb => cb.dataset.itemId);
-      if (!checked.length) {
-        notify(mode === 'client' ? 'Sélectionne au moins un client.' : 'Sélectionne au moins un chauffeur.', 'warning');
-        return;
-      }
-
+      syncExportFilter();
       try {
-        showLoader();
-        await ensurePlanningsLoadedFor(dateISO);
-        await generatePDF(dateISO, checked, statuts, mode);
+        if (typeof showLoader === 'function') showLoader();
+        if (fmt === 'excel') {
+          // Excel : pas de regroupement chauffeur/client — on exporte tout ce
+          // qui passe les filtres date + statuts + type + période.
+          const fromISO = document.getElementById('exportFrom').value;
+          const toISO   = document.getElementById('exportTo').value;
+          if (!fromISO || !toISO) { notify('Choisis une période.', 'warning'); return; }
+          if (typeof window.ensurePlanningsRange === 'function') await window.ensurePlanningsRange(fromISO, toISO);
+          await window.exportPlanningExcel({
+            fromISO, toISO, statuts,
+            types: getSelectedTypes(), periodes: getSelectedPeriodes()
+          });
+        } else {
+          const dateISO = document.getElementById('printDate').value;
+          if (!dateISO) { notify('Choisis une date.', 'warning'); return; }
+          const mode = getSelectedGroupMode();
+          const checked = Array.from(document.querySelectorAll('#printChauffeurList input[type="checkbox"]:checked')).map(cb => cb.dataset.itemId);
+          if (!checked.length) { notify(mode === 'client' ? 'Sélectionne au moins un client.' : 'Sélectionne au moins un chauffeur.', 'warning'); return; }
+          await ensurePlanningsLoadedFor(dateISO);
+          await generatePDF(dateISO, checked, statuts, mode);
+        }
         close();
       } catch (e) {
-        notify('Erreur génération PDF : ' + e.message, 'error');
+        notify('Erreur export : ' + e.message, 'error');
       } finally {
-        hideLoader();
+        if (typeof hideLoader === 'function') hideLoader();
       }
     });
 
-    // Premier remplissage
-    refreshList();
+    applyFormat();   // initialise l'affichage + premier remplissage de la liste
+  }
+
+  // Recopie les filtres type/période du panneau dans exportFilter (utilisé par
+  // getChauffeursAvecTournees / getClientsAvecTournees, donc PDF + listes).
+  function syncExportFilter() {
+    const types = getSelectedTypes();
+    const periodes = getSelectedPeriodes();
+    exportFilter.types = types.length ? types : null;
+    exportFilter.periodes = periodes.length ? periodes : null;
+  }
+
+  function getSelectedFormat() {
+    const r = document.querySelector('input[name="exportFormat"]:checked');
+    return (r && r.value) || 'pdf';
+  }
+  function getSelectedTypes() {
+    return Array.from(document.querySelectorAll('#exportTypeList input:checked')).map(cb => cb.dataset.type);
+  }
+  function getSelectedPeriodes() {
+    return Array.from(document.querySelectorAll('#exportPeriodeList input:checked')).map(cb => cb.dataset.periode);
   }
 
   // Lit les statuts cochés dans la modal
@@ -433,38 +478,41 @@
     return (r && r.value) || 'chauffeur';
   }
 
-  // Rafraîchit la liste centrale : chauffeurs ou clients selon le mode.
+  // Rafraîchit la liste de sélection (chauffeurs/clients) selon format + filtres.
+  // PDF : basée sur la date choisie. Excel : agrégée sur la plage du/au.
   function refreshList() {
-    const dateISO = document.getElementById('printDate').value;
     const listEl  = document.getElementById('printChauffeurList');
     const countEl = document.getElementById('printChauffeurCount');
     const labelEl = document.getElementById('printListLabel');
-    if (!dateISO) return;
+    if (!listEl) return;
 
+    syncExportFilter(); // type/période -> exportFilter (filtre les collecteurs)
+    // En Excel, la sélection chauffeur/client est masquée : rien à rendre.
+    if (getSelectedFormat() !== 'pdf') return;
     const statuts = getSelectedStatuts();
     const mode    = getSelectedGroupMode();
-
     if (labelEl) labelEl.textContent = mode === 'client' ? 'Clients' : 'Chauffeurs';
 
-    // Si pas de statut coché, on prévient et on vide la liste
     if (!statuts.length) {
       if (countEl) countEl.textContent = '';
-      listEl.innerHTML = `
-        <div style="text-align:center; color:var(--text-muted); padding:32px 16px; font-size:13px;">
-          Coche au moins un statut pour voir la liste.
-        </div>`;
+      listEl.innerHTML = `<div style="text-align:center; color:var(--text-muted); padding:32px 16px; font-size:13px;">Coche au moins un statut pour voir la liste.</div>`;
       return;
     }
 
-    // Si la date est en dehors de la vue chargée, on charge en arrière-plan
+    listEl.innerHTML = `<div style="text-align:center; color:var(--text-muted); padding:24px; font-size:13px;">Chargement…</div>`;
+
+    const dateISO = document.getElementById('printDate').value;
+    if (!dateISO) return;
     ensurePlanningsLoadedFor(dateISO).then(() => {
-      if (mode === 'client') renderClientList(dateISO, statuts, listEl, countEl);
-      else                   renderChauffeurList(dateISO, statuts, listEl, countEl);
+      const items = mode === 'client'
+        ? getClientsAvecTournees(dateISO, statuts)
+        : getChauffeursAvecTournees(dateISO, statuts);
+      if (mode === 'client') renderClientList(items, listEl, countEl);
+      else                   renderChauffeurList(items, listEl, countEl);
     });
   }
 
-  function renderChauffeurList(dateISO, statuts, listEl, countEl) {
-    const items = getChauffeursAvecTournees(dateISO, statuts);
+  function renderChauffeurList(items, listEl, countEl) {
 
     if (countEl) {
       countEl.textContent = items.length
@@ -515,8 +563,7 @@
     bindRowClicks(listEl);
   }
 
-  function renderClientList(dateISO, statuts, listEl, countEl) {
-    const items = getClientsAvecTournees(dateISO, statuts);
+  function renderClientList(items, listEl, countEl) {
 
     if (countEl) {
       countEl.textContent = items.length
@@ -861,12 +908,19 @@
       const client = cleanText(t.client) || '—';
 
       let lieu;
+      const s = cleanText(t.source) || '—';
+      const d = cleanText(t.destination) || '—';
+      lieu = `${s}\n» ${d}`;
       if (t.type === 'regie') {
-        lieu = cleanText(t.lieuChantier) || '—';
-      } else {
-        const s = cleanText(t.source) || '—';
-        const d = cleanText(t.destination) || '—';
-        lieu = `${s}\n» ${d}`;
+        const nb = Number(t.nombreTours) || 0;
+        if (nb) lieu += `\n${nb} tour${nb > 1 ? 's' : ''} effectué${nb > 1 ? 's' : ''}`;
+        if (Array.isArray(t.regieTours)) {
+          t.regieTours.forEach((rt, i) => {
+            const c = cleanText(rt.chargement) || '—';
+            const dd = cleanText(rt.dechargement) || '—';
+            if (rt.chargement || rt.dechargement) lieu += `\nT${i + 1}: ${c} » ${dd}`;
+          });
+        }
       }
 
       const camion = t.immatCamion || '—';
@@ -1017,12 +1071,19 @@
       const chauffeurName = ch ? `${ch.prenom || ''} ${ch.nom || ''}`.trim() : '—';
 
       let lieu;
+      const s = cleanText(t.source) || '—';
+      const d = cleanText(t.destination) || '—';
+      lieu = `${s}\n» ${d}`;
       if (t.type === 'regie') {
-        lieu = cleanText(t.lieuChantier) || '—';
-      } else {
-        const s = cleanText(t.source) || '—';
-        const d = cleanText(t.destination) || '—';
-        lieu = `${s}\n» ${d}`;
+        const nb = Number(t.nombreTours) || 0;
+        if (nb) lieu += `\n${nb} tour${nb > 1 ? 's' : ''} effectué${nb > 1 ? 's' : ''}`;
+        if (Array.isArray(t.regieTours)) {
+          t.regieTours.forEach((rt, i) => {
+            const c = cleanText(rt.chargement) || '—';
+            const dd = cleanText(rt.dechargement) || '—';
+            if (rt.chargement || rt.dechargement) lieu += `\nT${i + 1}: ${c} » ${dd}`;
+          });
+        }
       }
 
       const camion = t.immatCamion || '—';
@@ -1093,15 +1154,15 @@
     const btn = document.createElement('button');
     btn.id = 'printSheetBtn';
     btn.className = 'nav-btn import-toggle-btn'; // réutilise le style existant
-    btn.title = 'Imprimer les feuilles de tournée du jour';
+    btn.title = 'Exporter le planning (PDF feuilles de tournée ou Excel)';
     btn.innerHTML = `
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round">
-        <polyline points="6 9 6 2 18 2 18 9"/>
-        <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
-        <rect x="6" y="14" width="12" height="8"/>
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/>
+        <line x1="12" y1="15" x2="12" y2="3"/>
       </svg>
-      Feuilles de tournée
+      Exporter
     `;
     btn.addEventListener('click', () => buildPrintModal());
 
@@ -1110,8 +1171,8 @@
     if (importBtn && importBtn.parentNode) {
       importBtn.parentNode.insertBefore(btn, importBtn.nextSibling);
     } else {
-      // Fallback : on l'ajoute dans .header-right
-      document.querySelector('.header-right')?.prepend(btn);
+      // Fallback : on l'ajoute dans le cluster d'outils du header
+      document.querySelector('.header-tools')?.prepend(btn);
     }
   }
 

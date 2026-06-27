@@ -1,0 +1,8 @@
+{
+  "appId": "fr.yovatrans.app",
+  "appName": "Yovatrans",
+  "webDir": "app",
+  "server": {
+    "androidScheme": "https"
+  }
+}

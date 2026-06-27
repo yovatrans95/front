@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Yovatrans - Fiche vehicule</title>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
   :root{
     --bg:#f0f4ff;--white:#fff;--border:rgba(99,130,255,0.15);--border2:rgba(99,130,255,0.28);--blue-50:#eff3ff;--blue-100:#dce5ff;
@@ -129,6 +130,7 @@
   @media(max-width:900px){.doc-list{grid-template-columns:1fr}}
 
 </style>
+<link rel="stylesheet" href="responsive.css">
 </head>
 <div class="modal-overlay" id="deleteDocModal">
   <div class="confirm-modal">
@@ -312,6 +314,27 @@
         <div class="card-body"><div class="offidocs-grid" id="docsGrid"></div></div>
       </div>
     </div>
+
+    <!-- HISTORIQUE / ITINERAIRES -->
+    <div class="card" style="margin-top:18px">
+      <div class="card-header">
+        <span class="card-title">Historique des trajets</span>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <input type="date" id="histFrom" class="form-input" style="width:auto;padding:6px 10px;font-size:0.78rem">
+          <span style="color:var(--muted)">→</span>
+          <input type="date" id="histTo" class="form-input" style="width:auto;padding:6px 10px;font-size:0.78rem">
+          <button class="btn-primary" style="padding:6px 14px;font-size:0.78rem" onclick="loadHistory(false)">Charger</button>
+          <button class="btn-outline" style="padding:6px 14px;font-size:0.78rem" onclick="loadHistory(true)" title="Force la récupération chez les fournisseurs">Rafraîchir</button>
+        </div>
+      </div>
+      <div class="card-body">
+        <div id="histStatus" style="font-size:0.82rem;color:var(--muted);margin-bottom:10px">Choisis une période puis « Charger ».</div>
+        <div style="display:grid;grid-template-columns:1.1fr 1fr;gap:14px" id="histLayout">
+          <div id="histList" style="max-height:460px;overflow:auto;display:flex;flex-direction:column;gap:8px"></div>
+          <div id="histMap" style="height:460px;border-radius:14px;border:1px solid var(--border);background:#eef3ff"></div>
+        </div>
+      </div>
+    </div>
   </div>
 </main>
 
@@ -326,8 +349,10 @@
   </div>
 </div>
 
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="api.js"></script>
 <script src="sidebar.js" data-page="vehicles"></script>
 <script src="vehicule.js"></script>
+<script src="vehicle-history.js"></script>
 </body>
 </html>

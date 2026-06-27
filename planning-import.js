@@ -271,20 +271,24 @@ function parseMauffrey(pageTexts) {
 }
 
 // ── Détection période d'un tracteur depuis la "Prise de Poste" ───────────────
-// Parcourt les lignes du segment, trouve la première occurrence de
-// "Prise de Poste" puis l'heure qui la suit (même ligne ou 5 lignes suivantes).
-//   00:00 -> 'nuit'   (tracteur de nuit)
-//   autre -> 'journee' (tracteur de jour)
-//   rien trouvé -> null (le caller utilisera 'journee' par défaut)
+// L'heure n'est PAS sur la ligne "Prise de Poste" : elle est dans la colonne
+// "Arrivée" du premier Chargement, parfois 8-10 lignes plus loin (activité sur
+// deux lignes, adresse sur plusieurs lignes, et date coupée en deux par
+// l'extraction PDF : "12/06/202" puis "6 00:00:00"). On balaye donc tout le
+// segment jusqu'à "Fin de Poste" et on prend la PREMIÈRE heure rencontrée —
+// c'est toujours l'heure de départ de la tournée, seule heure du segment.
+//   heure 00:00 (minuit) -> 'nuit'
+//   sinon                -> 'journee'
+//   rien trouvé          -> null (le caller utilisera 'journee' par défaut)
 function detectPeriodeFromPriseDePoste(lines) {
   for (var i = 0; i < lines.length; i++) {
     if (/^Prise de Poste/i.test(lines[i])) {
-      for (var k = i; k < Math.min(lines.length, i + 6); k++) {
+      for (var k = i; k < lines.length; k++) {
+        if (k > i && /^Fin de Poste/i.test(lines[k])) break;
         var hm = lines[k].match(/\b(\d{1,2}):(\d{2})(?::\d{2})?\b/);
         if (hm) {
           var hh = parseInt(hm[1], 10);
-          var mm = parseInt(hm[2], 10);
-          return (hh === 0 && mm === 0) ? 'nuit' : 'journee';
+          return hh === 0 ? 'nuit' : 'journee';
         }
       }
       return null;
@@ -523,7 +527,7 @@ function detectPeriode(heure) {
   if (!heure) return 'journee';
   var h = parseInt(String(heure).split(':')[0], 10);
   if (Number.isNaN(h)) return 'journee';
-  return h < 6 ? 'nuit' : 'journee';
+  return h === 0 ? 'nuit' : 'journee';
 }
 
 // ─── Rendu ───────────────────────────────────────────────────────────────────

@@ -15,13 +15,18 @@ let state = {
   vehicules:    [],
   clientsList:  [],
   searchQuery:  '',
-  filterStatut: '',
-  filterType:   '',
-  filterClient: '',
+  // Filtres multi-sélection : on stocke les valeurs MASQUÉES (décochées).
+  // Set vide = tout affiché. Une valeur présente = masquée.
+  hiddenStatut:       new Set(),
+  hiddenType:         new Set(),
+  hiddenPeriode:      new Set(),
+  hiddenClient:       new Set(), // clés normalisées (normalizeClientKey)
+  hiddenClientSource: new Set(),
   modalMode:    'create',
   currentChauffeurId: null,
   currentDate:  null,
   currentTourId: null,
+  regieSepare:  false, // régie en mode départ/arrivée par tour (vs groupée)
   drag: { tourId: null, fromChauffeurId: null, fromDate: null, fromIdx: null },
 };
 
@@ -88,11 +93,21 @@ async function moveTour(fromChauffeurId, fromDate, tourId, toChauffeurId, toDate
   const tour = srcPlanning.tours.find(t => String(t._id) === String(tourId));
   if (!tour) throw new Error('Tour introuvable');
 
+  // Créer dans la destination (sans _id, sans createdBy/updatedBy — le backend les injecte)
+  const { _id, createdBy, updatedBy, createdAt, updatedAt, __v, ...tourData } = tour;
+
+  // Tour déplacé vers un AUTRE chauffeur : il prend l'immat de ce chauffeur
+  // (ses tours du jour, sinon son camion habituel) au lieu de garder celle de
+  // l'ancien chauffeur. Si le receveur n'a aucune immat connue, on garde
+  // l'immat d'origine. NB : à calculer AVANT le delete (le state local sert de source).
+  if (String(toChauffeurId) !== String(fromChauffeurId)) {
+    const immatReceveur = detectImmatForChauffeur(toChauffeurId, toDate);
+    if (immatReceveur) tourData.immatCamion = immatReceveur;
+  }
+
   // Supprimer de la source
   await deleteTour(fromChauffeurId, fromDate, tourId);
 
-  // Créer dans la destination (sans _id, sans createdBy/updatedBy — le backend les injecte)
-  const { _id, createdBy, updatedBy, createdAt, updatedAt, __v, ...tourData } = tour;
   await createTour(toChauffeurId, toDate, tourData);
 }
 
@@ -100,14 +115,11 @@ async function moveTour(fromChauffeurId, fromDate, tourId, toChauffeurId, toDate
 async function duplicateTour(tour, chauffeurId, dateISO) {
   // On retire les champs propres à l'instance (id, audit, version) avant POST
   const { _id, createdBy, updatedBy, createdAt, updatedAt, __v, ...data } = tour;
-  showLoader();
   try {
     await createTour(chauffeurId, dateISO, data);
-    await loadView();
+    await loadView(true); // duplication enregistrée en arrière-plan, sans spinner
   } catch (e) {
     notify('Erreur duplication : ' + e.message, 'error');
-  } finally {
-    hideLoader();
   }
 }
 
@@ -326,8 +338,132 @@ function buildImmatDatalist() {
 // ─── Champs dynamiques Tour / Régie ──────────────────────────────────────────
 function updateModalFields() {
   const type = document.querySelector('input[name="tourType"]:checked')?.value;
-  document.getElementById('fieldsLieux').style.display = type === 'tour' ? '' : 'none';
-  document.getElementById('fieldChantier').style.display = type === 'regie' ? '' : 'none';
+  const isRegie = type === 'regie';
+  const separe  = isRegie && state.regieSepare;
+
+  // La ligne des lieux reste affichée (elle porte le bouton bascule).
+  document.getElementById('fieldsLieux').style.display = '';
+  // Régie groupée (par défaut) : Départ/Arrivée généraux pour toute la régie.
+  // Régie séparée : un Départ/Arrivée par tour -> on retire les lieux groupés.
+  document.getElementById('grpSource').style.display      = separe ? 'none' : '';
+  document.getElementById('grpDestination').style.display = separe ? 'none' : '';
+  // Petit bouton bascule groupée <-> séparée : visible uniquement en régie
+  const btnSep = document.getElementById('btnSeparerRegie');
+  btnSep.style.display = isRegie ? '' : 'none';
+  btnSep.textContent   = separe ? 'Grouper' : 'Séparer';
+  btnSep.title         = separe
+    ? 'Régie groupée : un départ/arrivée commun à toute la régie'
+    : 'Séparer la régie : un départ/arrivée par tour';
+  // Nombre de tours : toujours en régie
+  document.getElementById('fieldNombreTours').style.display = isRegie ? '' : 'none';
+  // Détail départ/arrivée par tour : seulement si régie séparée
+  document.getElementById('fieldRegieTours').style.display = separe ? '' : 'none';
+  if (separe) syncRegieTourFields();
+  // Libellés des lieux adaptés au type (départ/arrivée en régie)
+  document.getElementById('lblSource').textContent      = isRegie ? 'Départ' : 'Source (chargement)';
+  document.getElementById('lblDestination').textContent = isRegie ? 'Arrivée' : 'Destination (déchargement)';
+}
+
+// Bascule entre régie groupée et régie séparée (départ/arrivée par tour).
+function toggleRegieSepare() {
+  state.regieSepare = !state.regieSepare;
+  if (state.regieSepare) {
+    const n = Math.max(1, parseInt(document.getElementById('fNombreTours').value, 10) || 0);
+    document.getElementById('fNombreTours').value = n;
+    // Pré-remplissage intelligent : si aucun détail par tour n'est saisi, on
+    // repart du Départ/Arrivée général (la plupart des régies répètent le même
+    // tour) — l'utilisateur n'a plus qu'à ajuster les tours différents.
+    let seed = readRegieTourFields();
+    if (!seed.some(r => r.chargement || r.dechargement)) {
+      const dep = document.getElementById('fSource').value.trim();
+      const arr = document.getElementById('fDestination').value.trim();
+      seed = Array.from({ length: n }, () => ({ chargement: dep, dechargement: arr }));
+    }
+    updateModalFields();
+    syncRegieTourFields(seed);
+    return;
+  }
+  updateModalFields();
+}
+
+// Ajoute un tour vide à la fin (bouton « Ajouter un tour »).
+function addRegieTour() {
+  const data = readRegieTourFields();
+  data.push({ chargement: '', dechargement: '' });
+  document.getElementById('fNombreTours').value = data.length;
+  syncRegieTourFields(data);
+}
+
+// Supprime le tour idx (et met à jour le nombre).
+function removeRegieTour(idx) {
+  const data = readRegieTourFields();
+  data.splice(idx, 1);
+  document.getElementById('fNombreTours').value = data.length;
+  syncRegieTourFields(data);
+}
+
+// Génère un emplacement chargement/déchargement par tour de régie, piloté par le
+// nombre saisi dans #fNombreTours. Les valeurs déjà saisies (ou chargées depuis
+// un tour existant) sont conservées quand on ajuste le nombre.
+function syncRegieTourFields(seed) {
+  const list = document.getElementById('regieToursList');
+  if (!list) return;
+  const count = Math.max(0, parseInt(document.getElementById('fNombreTours').value, 10) || 0);
+
+  // On part des valeurs actuellement à l'écran, complétées par d'éventuelles
+  // valeurs initiales (seed) lors de l'ouverture du modal.
+  const current = readRegieTourFields();
+  const data = seed || current;
+
+  let html = '';
+  for (let i = 0; i < count; i++) {
+    const row = data[i] || {};
+    html +=
+      '<div class="form-row regie-tour-row">' +
+        '<div class="regie-tour-head">' +
+          '<span class="regie-tour-title">Tour ' + (i + 1) + '</span>' +
+          '<span class="regie-tour-actions">' +
+            '<button type="button" class="regie-dup-btn" data-idx="' + i + '" title="Ajouter un tour identique">Dupliquer</button>' +
+            '<button type="button" class="regie-del-btn" data-idx="' + i + '" title="Supprimer ce tour" aria-label="Supprimer">&times;</button>' +
+          '</span>' +
+        '</div>' +
+        '<div class="regie-tour-fields">' +
+          '<div class="form-group">' +
+            '<label>Départ</label>' +
+            '<input type="text" class="regie-chargement" placeholder="Lieu de départ" value="' + escapeAttr(row.chargement || '') + '" />' +
+          '</div>' +
+          '<div class="form-group">' +
+            '<label>Arrivée</label>' +
+            '<input type="text" class="regie-dechargement" placeholder="Lieu d\'arrivée" value="' + escapeAttr(row.dechargement || '') + '" />' +
+          '</div>' +
+        '</div>' +
+      '</div>';
+  }
+  list.innerHTML = html;
+}
+
+// Ajoute un tour identique juste après le tour idx (et incrémente le nombre).
+// La plupart des régies répètent le même tour : on en remplit un puis on duplique.
+function duplicateRegieTour(idx) {
+  const data = readRegieTourFields();
+  const src = data[idx];
+  if (!src) return;
+  data.splice(idx + 1, 0, { chargement: src.chargement, dechargement: src.dechargement });
+  document.getElementById('fNombreTours').value = data.length;
+  syncRegieTourFields(data);
+}
+
+// Lit les emplacements départ/arrivée actuellement affichés.
+function readRegieTourFields() {
+  const rows = document.querySelectorAll('#regieToursList .regie-tour-row');
+  return Array.from(rows).map(r => ({
+    chargement:   (r.querySelector('.regie-chargement')?.value   || '').trim(),
+    dechargement: (r.querySelector('.regie-dechargement')?.value || '').trim()
+  }));
+}
+
+function escapeAttr(s) {
+  return String(s || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // ─── Affectation camion à toute la journée ───────────────────────────────────
@@ -354,6 +490,45 @@ function getOccupiedVehiclesForDate(dateISO, excludeChauffeurId, periode) {
     });
   });
   return occupied;
+}
+
+// ── Détection automatique de l'immat d'un chauffeur ──────────────────────────
+// Utilisée à l'ouverture du modal "Nouveau tour" pour pré-remplir le camion :
+//  1) ses autres tours du MÊME JOUR qui ont déjà une immat (la plus utilisée) ;
+//  2) sinon, son immat la plus récente dans la fenêtre chargée — mais uniquement
+//     si ce camion n'est pas déjà affecté à un autre chauffeur ce jour-là.
+// Renvoie '' si rien de fiable (l'utilisateur choisit alors comme avant).
+function detectImmatForChauffeur(chauffeurId, dateISO) {
+  const chId = String(chauffeurId);
+  const mine = state.plannings.filter(p => String(p.chauffeurId?._id || p.chauffeurId) === chId);
+
+  // 1) Tours du même jour : son camion du jour est déjà connu.
+  const today = mine.find(p => p.date === dateISO);
+  if (today) {
+    const counts = new Map();
+    (today.tours || []).forEach(t => {
+      if (t.immatCamion) counts.set(t.immatCamion, (counts.get(t.immatCamion) || 0) + 1);
+    });
+    let best = '';
+    let bestN = 0;
+    counts.forEach((n, immat) => { if (n > bestN) { best = immat; bestN = n; } });
+    if (best) return best;
+  }
+
+  // 2) Son camion habituel : l'immat la plus récente sur les autres jours chargés.
+  const recent = mine
+    .filter(p => p.date !== dateISO && (p.tours || []).some(t => t.immatCamion))
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
+  for (const p of recent) {
+    const withImmat = [...(p.tours || [])].reverse().find(t => t.immatCamion);
+    if (!withImmat) continue;
+    const occupied = getOccupiedVehiclesForDate(dateISO, chauffeurId, null);
+    // Son camion habituel est pris par un autre chauffeur ce jour-là : ne rien
+    // suggérer plutôt que suggérer un conflit.
+    return occupied.has(withImmat.immatCamion) ? '' : withImmat.immatCamion;
+  }
+  return '';
 }
 
 // Période "dominante" des tours du jour : si tous nuit -> 'nuit', sinon 'journee'
@@ -450,17 +625,15 @@ async function assignVehicleToDay(chauffeurId, dateISO, immat) {
     if (!ok) return;
   }
 
-  showLoader();
   try {
     await Promise.all(
       toUpdate.map(t => updateTour(chauffeurId, dateISO, t._id, { ...t, immatCamion: immat }))
     );
     notify(`Camion ${immat} appliqué à ${toUpdate.length} tournée(s).`, 'success');
-    await loadView();
+    await loadView(true); // affectation enregistrée en arrière-plan, sans spinner
   } catch (e) {
     notify('Erreur affectation : ' + e.message, 'error');
-  } finally {
-    hideLoader();
+    await loadView(true);
   }
 }
 
@@ -687,11 +860,12 @@ function getPlanningForCell(chauffeurId, dateISO) {
   );
 }
 function filterTours(tours) {
-  const filterClientKey = state.filterClient ? normalizeClientKey(state.filterClient) : '';
   return tours.filter(t => {
-    if (state.filterStatut && t.statut !== state.filterStatut) return false;
-    if (state.filterType   && t.type   !== state.filterType)   return false;
-    if (filterClientKey && normalizeClientKey(t.client) !== filterClientKey) return false;
+    if (state.hiddenStatut.has(t.statut || 'planifie')) return false;
+    if (state.hiddenType.has(t.type)) return false;
+    if (state.hiddenPeriode.has(t.heurePeriode || 'journee')) return false;
+    if (state.hiddenClient.has(normalizeClientKey(t.client))) return false;
+    if (state.hiddenClientSource.has(t.clientSource || 'manuel')) return false;
     return true;
   });
 }
@@ -770,11 +944,16 @@ function renderTourCard(tour, chauffeurId, dateISO, idx, total) {
   const ref = tour.refTransport ? `<div class="tc-ref">${tour.refTransport}</div>` : '';
 
   let lieuHtml = '';
-  if (tour.type === 'tour') {
-    if (tour.source)       lieuHtml += `<div class="tc-lieu">${tour.source}</div>`;
-    if (tour.destination)  lieuHtml += `<div class="tc-lieu tc-lieu-dest">${tour.destination}</div>`;
-  } else {
-    if (tour.lieuChantier) lieuHtml += `<div class="tc-lieu">${tour.lieuChantier}</div>`;
+  if (tour.source)       lieuHtml += `<div class="tc-lieu">${tour.source}</div>`;
+  if (tour.destination)  lieuHtml += `<div class="tc-lieu tc-lieu-dest">${tour.destination}</div>`;
+  if (tour.type === 'regie' && tour.nombreTours) {
+    lieuHtml += `<div class="tc-lieu tc-lieu-tours">${tour.nombreTours} tour${tour.nombreTours > 1 ? 's' : ''} effectué${tour.nombreTours > 1 ? 's' : ''}</div>`;
+  }
+  if (tour.type === 'regie' && Array.isArray(tour.regieTours) && tour.regieTours.length) {
+    tour.regieTours.forEach((rt, i) => {
+      if (!rt.chargement && !rt.dechargement) return;
+      lieuHtml += `<div class="tc-lieu tc-lieu-regie">T${i + 1} : ${escapeAttr(rt.chargement || '—')} » ${escapeAttr(rt.dechargement || '—')}</div>`;
+    });
   }
 
   card.innerHTML = `
@@ -813,6 +992,7 @@ function renderTourCard(tour, chauffeurId, dateISO, idx, total) {
 function renderGrid() {
   const grid = document.getElementById('planningGrid');
   const days  = getViewDays();
+  let visibleToursCount = 0;
 
   grid.style.gridTemplateColumns = `var(--col-chauffeur) repeat(${days.length}, minmax(var(--cell-min-w), 1fr))`;
   grid.dataset.days = days.length;
@@ -858,6 +1038,7 @@ function renderGrid() {
       const dateISO  = toISO(day);
       const planning = getPlanningForCell(chId, dateISO);
       const tours    = planning ? filterTours(planning.tours) : [];
+      if (rowVisible) visibleToursCount += tours.length;
 
       const cell = document.createElement('div');
       cell.className = 'day-cell' + (isWeekend(day) ? ' weekend' : '');
@@ -893,14 +1074,13 @@ function renderGrid() {
         const { tourId, fromChauffeurId, fromDate } = state.drag;
         if (!tourId) return;
         if (fromChauffeurId === chId && fromDate === dateISO) return;
-        showLoader();
         try {
           await moveTour(fromChauffeurId, fromDate, tourId, chId, dateISO);
-          await loadView();
+          await loadView(true); // déplacement enregistré en arrière-plan, sans spinner
         } catch(err) {
           notify('Erreur déplacement : ' + err.message, 'error');
+          await loadView(true);
         } finally {
-          hideLoader();
           state.drag = { tourId:null, fromChauffeurId:null, fromDate:null, fromIdx:null };
         }
       });
@@ -943,6 +1123,8 @@ function renderGrid() {
       grid.appendChild(cell);
     });
   });
+
+  updateFilterUI(visibleToursCount);
 }
 
 // ─── Label semaine ────────────────────────────────────────────────────────────
@@ -956,8 +1138,10 @@ function updateWeekLabel() {
 }
 
 // ─── Chargement ───────────────────────────────────────────────────────────────
-async function loadView() {
-  showLoader();
+// silent = true : rafraîchissement en arrière-plan, sans spinner bloquant
+// (utilisé après une action ; le chargement initial / la navigation gardent le loader).
+async function loadView(silent = false) {
+  if (!silent) showLoader();
   try {
     const days = getViewDays();
     state.plannings = await loadPlannings(toISO(days[0]), toISO(days[days.length-1]));
@@ -966,7 +1150,7 @@ async function loadView() {
   } catch(e) {
     notify('Erreur chargement : ' + e.message, 'error');
   } finally {
-    hideLoader();
+    if (!silent) hideLoader();
   }
 }
 
@@ -1017,7 +1201,10 @@ function openModal(mode, chauffeurId, dateISO, tour) {
     document.querySelectorAll('input[name="heurePeriode"]').forEach(r => { r.checked = r.value === (tour.heurePeriode || 'journee'); });
     document.getElementById('fSource').value        = tour.source        || '';
     document.getElementById('fDestination').value   = tour.destination   || '';
-    document.getElementById('fChantier').value      = tour.lieuChantier  || '';
+    document.getElementById('fNombreTours').value   = tour.nombreTours   ?? 0;
+    state._regieToursSeed = Array.isArray(tour.regieTours) ? tour.regieTours : [];
+    // Régie séparée si on a déjà du détail par tour enregistré.
+    state.regieSepare = state._regieToursSeed.length > 0;
     document.getElementById('fRefTransport').value  = tour.refTransport  || '';
     document.getElementById('fNotes').value         = tour.notes         || '';
     document.getElementById('modalMeta').style.display = 'block';
@@ -1028,18 +1215,22 @@ function openModal(mode, chauffeurId, dateISO, tour) {
     document.querySelector('input[name="tourType"][value="tour"]').checked = true;
     document.getElementById('fStatut').value        = 'planifie';
     document.getElementById('fClient').value        = '';
-    document.getElementById('fImmat').value         = '';
+    // Immat pré-remplie depuis les autres tours du chauffeur (jour, sinon récents).
+    document.getElementById('fImmat').value         = detectImmatForChauffeur(chauffeurId, dateISO);
     document.getElementById('fPeriode').value = 'journee';
     document.querySelectorAll('input[name="heurePeriode"]').forEach(r => { r.checked = r.value === 'journee'; });
     document.getElementById('fSource').value        = '';
     document.getElementById('fDestination').value   = '';
-    document.getElementById('fChantier').value      = '';
+    document.getElementById('fNombreTours').value   = 0;
+    state._regieToursSeed = [];
+    state.regieSepare = false;
     document.getElementById('fRefTransport').value  = '';
     document.getElementById('fNotes').value         = '';
     document.getElementById('modalMeta').style.display = 'none';
   }
 
   updateModalFields();
+  syncRegieTourFields(state._regieToursSeed || []);
   ensureImmatPickerButton();
   setTimeout(() => document.getElementById('fClient')?.focus(), 80);
   document.getElementById('tourModal').style.display = 'flex';
@@ -1072,9 +1263,11 @@ function getFormData() {
     client:        canonicalizeClientName(document.getElementById('fClient').value),
     immatCamion:   document.getElementById('fImmat').value.trim(),
     heurePeriode:  document.getElementById('fPeriode').value,
-    source:        type === 'tour' ? document.getElementById('fSource').value.trim()      : '',
-    destination:   type === 'tour' ? document.getElementById('fDestination').value.trim() : '',
-    lieuChantier:  type === 'regie'? document.getElementById('fChantier').value.trim()    : '',
+    source:        document.getElementById('fSource').value.trim(),
+    destination:   document.getElementById('fDestination').value.trim(),
+    nombreTours:   type === 'regie'? Math.max(0, parseInt(document.getElementById('fNombreTours').value, 10) || 0) : 0,
+    // Détail par tour seulement si la régie est en mode séparé (sinon vide).
+    regieTours:    (type === 'regie' && state.regieSepare) ? readRegieTourFields() : [],
     refTransport:  document.getElementById('fRefTransport').value.trim() || null,
     notes:         document.getElementById('fNotes').value.trim(),
   };
@@ -1084,37 +1277,45 @@ async function handleSave() {
   const data = getFormData();
   if (!data.client)     { notify('Le client est requis.', 'warning'); return; }
 
-  showLoader();
+  // On capture le contexte puis on ferme le modal tout de suite : l'enregistrement
+  // part en arrière-plan, l'utilisateur ne patiente devant aucun spinner.
+  const mode        = state.modalMode;
+  const chauffeurId = state.currentChauffeurId;
+  const date        = state.currentDate;
+  const tourId      = state.currentTourId;
+  closeModal();
+
   try {
-    if (state.modalMode === 'create') {
-      await createTour(state.currentChauffeurId, state.currentDate, data);
+    if (mode === 'create') {
+      await createTour(chauffeurId, date, data);
     } else {
-      await updateTour(state.currentChauffeurId, state.currentDate, state.currentTourId, data);
+      await updateTour(chauffeurId, date, tourId, data);
     }
-    closeModal();
-    await loadView();
+    await loadView(true); // rafraîchit la grille sans spinner
     // Toute sauvegarde depuis le modal est manuelle -> rafraîchir la liste clients/datalist
     state.clientsList = await loadClients();
     populateClientFilter();
   } catch(e) {
     notify('Erreur : ' + e.message, 'error');
-  } finally {
-    hideLoader();
+    await loadView(true); // resync silencieux pour revenir à un état cohérent
   }
 }
 
 async function handleDelete() {
   const ok = await confirmDialog('Cette action est irréversible.', { title: 'Supprimer ce tour ?', okLabel: 'Supprimer', danger: true });
   if (!ok) return;
-  showLoader();
+
+  const chauffeurId = state.currentChauffeurId;
+  const date        = state.currentDate;
+  const tourId      = state.currentTourId;
+  closeModal();
+
   try {
-    await deleteTour(state.currentChauffeurId, state.currentDate, state.currentTourId);
-    closeModal();
-    await loadView();
+    await deleteTour(chauffeurId, date, tourId);
+    await loadView(true);
   } catch(e) {
     notify('Erreur : ' + e.message, 'error');
-  } finally {
-    hideLoader();
+    await loadView(true);
   }
 }
 
@@ -1160,29 +1361,212 @@ function dedupeClientList(list) {
   return out;
 }
 
-// ─── Filtres ──────────────────────────────────────────────────────────────────
-function populateClientFilter() {
-  const sel = document.getElementById('filterClient');
-  const cur = sel.value;
-  // Dédup insensible à casse/accents : "Mauffrey" et "MAUFFREY" -> un seul item
-  const uniqueClients = dedupeClientList(state.clientsList);
-  sel.innerHTML = '<option value="">Tous les clients</option>';
-  uniqueClients.forEach(c => {
-    const opt = document.createElement('option');
-    opt.value = c; opt.textContent = c;
-    sel.appendChild(opt);
-  });
-  // On restaure la sélection courante si elle existe encore (en dédup-insensible)
-  if (cur) {
-    const matching = uniqueClients.find(c => normalizeClientKey(c) === normalizeClientKey(cur));
-    sel.value = matching || '';
+// ─── Filtres multi-sélection ───────────────────────────────────────────────────
+// Chaque filtre est un menu déroulant avec des cases à cocher. On stocke dans le
+// state le Set des valeurs MASQUÉES (décochées) ; tout coché = tout affiché.
+const FILTER_DEFS = {
+  statut: {
+    label: 'Statut',
+    hiddenKey: 'hiddenStatut',
+    options: () => [
+      ['planifie', 'Planifié'], ['annule', 'Annulé'], ['chute', 'Chute'],
+      ['debord', 'Débord'], ['passage_vide', 'Passage à vide'], ['effectue', 'Effectué'],
+    ],
+  },
+  type: {
+    label: 'Type',
+    hiddenKey: 'hiddenType',
+    options: () => [['tour', 'Tour'], ['regie', 'Régie']],
+  },
+  periode: {
+    label: 'Période',
+    hiddenKey: 'hiddenPeriode',
+    options: () => [['journee', 'Journée'], ['nuit', 'Nuit']],
+  },
+  client: {
+    label: 'Client',
+    hiddenKey: 'hiddenClient',
+    // value = clé normalisée, label = forme d'affichage
+    options: () => dedupeClientList(state.clientsList).map(c => [normalizeClientKey(c), c]),
+  },
+  source: {
+    label: 'Source',
+    hiddenKey: 'hiddenClientSource',
+    options: () => [['mauffrey', 'Mauffrey'], ['manuel', 'Manuel']],
+  },
+};
+
+// (Re)construit le bouton + le panneau d'un filtre dans son conteneur.
+function renderMultiFilter(key) {
+  const def = FILTER_DEFS[key];
+  const container = document.querySelector(`.filter-multi[data-filter="${key}"]`);
+  if (!container || !def) return;
+
+  const options  = def.options();
+  const hidden   = state[def.hiddenKey];
+  const selected = options.filter(([v]) => !hidden.has(v)).length;
+  const total    = options.length;
+  const allShown = selected === total;
+
+  container.innerHTML = '';
+
+  // Bouton d'ouverture
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'filter-multi-btn' + (allShown ? '' : ' is-active');
+  btn.setAttribute('aria-expanded', 'false');
+  const lbl = document.createElement('span');
+  lbl.className = 'fm-label';
+  lbl.textContent = def.label;
+  btn.appendChild(lbl);
+  if (!allShown) {
+    const badge = document.createElement('span');
+    badge.className = 'fm-badge';
+    badge.textContent = `${selected}/${total}`;
+    btn.appendChild(badge);
   }
+  btn.insertAdjacentHTML('beforeend',
+    '<svg class="fm-caret" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>');
+  container.appendChild(btn);
+
+  // Panneau
+  const panel = document.createElement('div');
+  panel.className = 'filter-multi-panel';
+  panel.hidden = true;
+
+  const actions = document.createElement('div');
+  actions.className = 'fm-panel-actions';
+  const btnAll  = document.createElement('button');
+  btnAll.type = 'button'; btnAll.className = 'fm-action'; btnAll.textContent = 'Tout';
+  const btnNone = document.createElement('button');
+  btnNone.type = 'button'; btnNone.className = 'fm-action'; btnNone.textContent = 'Aucun';
+  actions.append(btnAll, btnNone);
+  panel.appendChild(actions);
+
+  const list = document.createElement('div');
+  list.className = 'fm-options';
+  if (options.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'fm-empty';
+    empty.textContent = 'Aucune option';
+    list.appendChild(empty);
+  }
+  options.forEach(([value, label]) => {
+    const row = document.createElement('label');
+    row.className = 'fm-option';
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.checked = !hidden.has(value);
+    cb.addEventListener('change', () => {
+      if (cb.checked) hidden.delete(value); else hidden.add(value);
+      renderGrid();
+      refreshMultiFilterButton(key); // maj badge/surlignage sans fermer le panneau
+    });
+    const span = document.createElement('span');
+    span.textContent = label;
+    row.append(cb, span);
+    list.appendChild(row);
+  });
+  panel.appendChild(list);
+  container.appendChild(panel);
+
+  // Actions Tout / Aucun
+  btnAll.addEventListener('click', () => {
+    hidden.clear();
+    list.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = true; });
+    renderGrid();
+    refreshMultiFilterButton(key);
+  });
+  btnNone.addEventListener('click', () => {
+    options.forEach(([v]) => hidden.add(v));
+    list.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = false; });
+    renderGrid();
+    refreshMultiFilterButton(key);
+  });
+
+  // Ouverture / fermeture
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const isOpen = !panel.hidden;
+    closeAllFilterPanels();
+    if (!isOpen) {
+      panel.hidden = false;
+      btn.setAttribute('aria-expanded', 'true');
+      container.classList.add('open');
+    }
+  });
+  panel.addEventListener('click', e => e.stopPropagation());
+}
+
+// Met à jour le badge + surlignage du bouton d'un filtre (panneau laissé ouvert).
+function refreshMultiFilterButton(key) {
+  const def = FILTER_DEFS[key];
+  const container = document.querySelector(`.filter-multi[data-filter="${key}"]`);
+  if (!container || !def) return;
+  const options  = def.options();
+  const hidden   = state[def.hiddenKey];
+  const selected = options.filter(([v]) => !hidden.has(v)).length;
+  const total    = options.length;
+  const allShown = selected === total;
+  const btn = container.querySelector('.filter-multi-btn');
+  if (!btn) return;
+  btn.classList.toggle('is-active', !allShown);
+  let badge = btn.querySelector('.fm-badge');
+  if (allShown) {
+    badge?.remove();
+  } else {
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'fm-badge';
+      btn.querySelector('.fm-label').insertAdjacentElement('afterend', badge);
+    }
+    badge.textContent = `${selected}/${total}`;
+  }
+}
+
+function closeAllFilterPanels() {
+  document.querySelectorAll('.filter-multi').forEach(c => {
+    const panel = c.querySelector('.filter-multi-panel');
+    if (panel) panel.hidden = true;
+    c.classList.remove('open');
+    c.querySelector('.filter-multi-btn')?.setAttribute('aria-expanded', 'false');
+  });
+}
+
+function buildAllFilters() {
+  Object.keys(FILTER_DEFS).forEach(renderMultiFilter);
+}
+
+// Reconstruit le filtre Client (liste dynamique) + la datalist du modal de saisie.
+function populateClientFilter() {
+  renderMultiFilter('client');
   const dl = document.getElementById('clientSuggestions');
   if (!dl) return;
   dl.innerHTML = '';
-  uniqueClients.forEach(c => {
+  dedupeClientList(state.clientsList).forEach(c => {
     const opt = document.createElement('option'); opt.value = c; dl.appendChild(opt);
   });
+}
+
+// Met à jour le compteur de tournées affichées.
+function updateFilterUI(visibleCount) {
+  const anyHidden = ['hiddenStatut', 'hiddenType', 'hiddenPeriode', 'hiddenClient', 'hiddenClientSource']
+    .some(k => state[k].size > 0);
+  const anyActive = anyHidden || !!state.searchQuery;
+  const countEl = document.getElementById('filterCount');
+  if (countEl) {
+    countEl.textContent = (anyActive && typeof visibleCount === 'number')
+      ? `${visibleCount} tournée${visibleCount > 1 ? 's' : ''} affichée${visibleCount > 1 ? 's' : ''}`
+      : '';
+  }
+}
+
+// Réinitialise tous les filtres (hors recherche, qui a son propre bouton ✕).
+function resetFilters() {
+  ['hiddenStatut', 'hiddenType', 'hiddenPeriode', 'hiddenClient', 'hiddenClientSource']
+    .forEach(k => state[k].clear());
+  buildAllFilters();
+  renderGrid();
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
@@ -1234,19 +1618,49 @@ document.addEventListener('DOMContentLoaded', async () => {
   });
 
   let searchTimer;
-  document.getElementById('searchInput').addEventListener('input', e => {
+  const searchInput = document.getElementById('searchInput');
+  const searchClear = document.getElementById('searchClear');
+  searchInput.addEventListener('input', e => {
+    const val = e.target.value;
+    if (searchClear) searchClear.style.display = val ? '' : 'none';
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => { state.searchQuery = e.target.value.trim(); renderGrid(); }, 300);
+    searchTimer = setTimeout(() => { state.searchQuery = val.trim(); renderGrid(); }, 300);
+  });
+  searchClear?.addEventListener('click', () => {
+    searchInput.value = '';
+    searchClear.style.display = 'none';
+    state.searchQuery = '';
+    renderGrid();
+    searchInput.focus();
   });
 
-  document.getElementById('filterStatut').addEventListener('change', e => { state.filterStatut = e.target.value; renderGrid(); });
-  document.getElementById('filterType').addEventListener('change',   e => { state.filterType   = e.target.value; renderGrid(); });
-  document.getElementById('filterClient').addEventListener('change', e => { state.filterClient  = e.target.value; renderGrid(); });
+  // Construction initiale des filtres multi-sélection (statut, type, période, source).
+  // Le filtre Client est (re)construit par populateClientFilter() une fois les clients chargés.
+  buildAllFilters();
+  document.getElementById('btnResetFilters').addEventListener('click', resetFilters);
+  // Fermer les panneaux de filtre au clic en dehors
+  document.addEventListener('click', () => closeAllFilterPanels());
 
   // Champs dynamiques Tour/Régie
   document.querySelectorAll('input[name="tourType"]').forEach(r =>
     r.addEventListener('change', updateModalFields)
   );
+
+  // Régie : ajuster le nombre d'emplacements départ/arrivée
+  document.getElementById('fNombreTours').addEventListener('input', () => {
+    if (state.regieSepare) syncRegieTourFields();
+  });
+  // Régie : bascule groupée <-> séparée
+  document.getElementById('btnSeparerRegie').addEventListener('click', toggleRegieSepare);
+  // Régie : ajouter un tour (bouton sous la liste)
+  document.getElementById('addRegieTourBtn')?.addEventListener('click', addRegieTour);
+  // Régie : dupliquer / supprimer un tour (délégation : la liste est régénérée)
+  document.getElementById('regieToursList').addEventListener('click', e => {
+    const dup = e.target.closest('.regie-dup-btn');
+    if (dup) { duplicateRegieTour(parseInt(dup.dataset.idx, 10)); return; }
+    const del = e.target.closest('.regie-del-btn');
+    if (del) removeRegieTour(parseInt(del.dataset.idx, 10));
+  });
 
   // Si la popover camion est ouverte et qu'on change la période -> on rafraîchit la liste libre/occupé
   document.querySelectorAll('input[name="heurePeriode"]').forEach(r =>

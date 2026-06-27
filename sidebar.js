@@ -126,4 +126,44 @@
   document.getElementById('logoutBtn')?.addEventListener('click', () => {
     logout();
   });
+
+  /* ─────────────────────────────────────────────
+     Menu mobile : bouton burger + overlay + gestes
+     ───────────────────────────────────────────── */
+  if (!document.querySelector('.mobile-nav-toggle')) {
+    const toggle = document.createElement('button');
+    toggle.className = 'mobile-nav-toggle';
+    toggle.setAttribute('aria-label', 'Ouvrir le menu');
+    toggle.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'sidebar-overlay';
+
+    document.body.appendChild(toggle);
+    document.body.appendChild(overlay);
+
+    const openNav  = () => document.body.classList.add('nav-open');
+    const closeNav = () => document.body.classList.remove('nav-open');
+
+    toggle.addEventListener('click', () => {
+      document.body.classList.toggle('nav-open');
+    });
+    overlay.addEventListener('click', closeNav);
+
+    // Fermer après avoir cliqué un lien de navigation
+    document.querySelectorAll('.sidebar .nav-item').forEach(item => {
+      item.addEventListener('click', closeNav);
+    });
+
+    // Échap ferme le menu
+    document.addEventListener('keydown', e => {
+      if (e.key === 'Escape') closeNav();
+    });
+
+    // Repasser proprement en desktop sur redimensionnement
+    window.addEventListener('resize', () => {
+      if (window.innerWidth > 900) closeNav();
+    });
+  }
 })();

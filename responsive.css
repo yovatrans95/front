@@ -1,0 +1,142 @@
+/* ============================================================
+   Yovatrans — Feuille de style RESPONSIVE partagée
+   Chargée en DERNIER sur chaque page pour surcharger les styles.
+   Gère : sidebar -> menu coulissant mobile, grilles, tableaux,
+   formulaires, modales, cartes. Breakpoints : 900px et 540px.
+   ============================================================ */
+
+/* ---- Bouton burger (injecté par sidebar.js) ---- */
+.mobile-nav-toggle{
+  display:none;
+  position:fixed; top:14px; left:14px; z-index:300;
+  width:44px; height:44px; border:none; border-radius:13px;
+  background:linear-gradient(160deg,#1e3a8a 0%,#3a5ce4 45%,#7c4fe0 100%);
+  color:#fff; cursor:pointer; align-items:center; justify-content:center;
+  box-shadow:0 6px 20px rgba(30,58,138,0.4);
+}
+.mobile-nav-toggle svg{width:22px;height:22px}
+.mobile-nav-toggle:active{transform:scale(0.94)}
+
+/* ---- Overlay sombre derrière le menu ouvert ---- */
+.sidebar-overlay{
+  display:none; position:fixed; inset:0; z-index:150;
+  background:rgba(26,44,110,0.45); backdrop-filter:blur(2px);
+}
+
+/* ============================================================
+   <= 900px : tablette / téléphone
+   ============================================================ */
+@media (max-width:900px){
+
+  /* --- Sidebar en tiroir coulissant --- */
+  .sidebar{
+    width:min(80vw,290px) !important;
+    transform:translateX(-100%);
+    transition:transform .28s cubic-bezier(.4,0,.2,1);
+    z-index:200 !important;
+    overflow-y:auto;
+  }
+  body.nav-open .sidebar{transform:translateX(0)}
+  body.nav-open .sidebar-overlay{display:block}
+
+  .mobile-nav-toggle{display:flex}
+
+  /* --- Contenu : pleine largeur, on dégage la place du burger --- */
+  .main,
+  .page-wrapper{
+    margin-left:0 !important;
+    padding:72px 16px 28px !important;
+    max-width:100% !important;
+  }
+
+  /* --- En-tête de page empilé --- */
+  .page-header,
+  .planning-header{
+    flex-direction:column;
+    align-items:flex-start;
+    gap:14px;
+  }
+  .page-title{font-size:1.55rem !important}
+
+  /* --- Toutes les grilles passent en 1 colonne --- */
+  .stats-bar,
+  .stats-grid,
+  .stats,
+  .form-row,
+  .form-row.three,
+  .layout,
+  .layout-two,
+  .two-col,
+  .info-grid,
+  .hero,
+  .hero-quick,
+  .offidocs-grid,
+  .doc-list,
+  .form-layout,
+  .filters-card{
+    grid-template-columns:1fr !important;
+  }
+  /* Les blocs de stats restent à 2 colonnes (plus lisible) */
+  .stats-bar,
+  .stats-grid,
+  .stats{
+    grid-template-columns:repeat(2,1fr) !important;
+  }
+
+  .grid-view{
+    grid-template-columns:repeat(auto-fill,minmax(150px,1fr)) !important;
+  }
+
+  /* --- Barre d'outils + recherche --- */
+  .toolbar,
+  .filters,
+  .view-range-btns{flex-wrap:wrap}
+  .search-wrap,
+  .search-bar{flex:1 1 100% !important; min-width:0 !important}
+  .filter-select{min-width:0 !important; flex:1}
+
+  /* --- Tableaux : défilement horizontal --- */
+  .table-wrap{overflow-x:auto; -webkit-overflow-scrolling:touch}
+  .table-wrap table{min-width:600px}
+
+  /* --- Modales plein écran --- */
+  .modal{
+    width:94vw !important;
+    max-width:94vw !important;
+    max-height:90vh !important;
+  }
+  .modal-body{padding:18px !important}
+
+  /* --- Cartes (tracking / stations) --- */
+  .layout{height:auto !important}
+  .map,
+  #map{height:58vh !important; min-height:340px !important}
+
+  /* --- Boutons d'action plus accessibles au doigt --- */
+  .btn-primary{justify-content:center}
+}
+
+/* ============================================================
+   <= 540px : petit téléphone
+   ============================================================ */
+@media (max-width:540px){
+  .main,
+  .page-wrapper{padding:68px 12px 24px !important}
+
+  /* Stats sur une seule colonne */
+  .stats-bar,
+  .stats-grid,
+  .stats{grid-template-columns:1fr !important}
+
+  /* Le bouton principal de l'en-tête prend toute la largeur */
+  .page-header .btn-primary{width:100%}
+
+  .page-title{font-size:1.35rem !important}
+  .stat-value{font-size:1.7rem !important}
+
+  /* Cartes chauffeurs un peu plus compactes */
+  .grid-view{grid-template-columns:1fr !important}
+
+  .map,
+  #map{height:52vh !important; min-height:300px !important}
+}

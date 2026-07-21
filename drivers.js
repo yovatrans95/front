@@ -56,10 +56,18 @@ function filter() {
 
 function render() {
   view === 'table' ? renderTable() : renderGrid();
+  // Les barres de pagination ne sont plus utilisées : on affiche toute la liste
+  // et on la fait défiler. On masque les conteneurs vides pour éviter une barre
+  // fantôme sous le tableau / la grille.
+  const p1 = document.getElementById('pag1'); if (p1) p1.style.display = 'none';
+  const p2 = document.getElementById('pag2'); if (p2 && p2.parentElement) p2.parentElement.style.display = 'none';
 }
 
+// Renvoie tous les chauffeurs filtrés : la liste défile en entier (pas de
+// pagination — avant, seuls les 10 premiers s'affichaient et les suivants
+// étaient inaccessibles car aucune commande de pagination n'était générée).
 function getPage() {
-  return filtered.slice((page - 1) * PER, page * PER);
+  return filtered;
 }
 
 function renderTable() {

@@ -12,6 +12,14 @@
   let drawSeq = 0;              // ignore les dessins obsolètes si on clique vite
   const roadCache = {};         // cache des itinéraires OSRM
 
+  // Complétion des trajets passés en arrière-plan (serveur) : on re-demande
+  // discrètement la liste quelques fois jusqu'à ce que tout soit archivé.
+  let userInteracted = false;   // l'utilisateur a cliqué un jour/trajet ou bougé la carte
+  let pollTimer = null;         // minuterie du prochain rafraîchissement discret
+  let pollsLeft = 0;            // nombre de rafraîchissements automatiques restants
+  const MAX_POLLS = 5;          // ~5 essais espacés de 5 s = 25 s max
+  const POLL_DELAY_MS = 5000;
+
   // ----------------------------- ICONES SVG -----------------------------
 
   const SVG = {
@@ -88,6 +96,9 @@
     histMap = L.map('histMap', { zoomControl: true }).setView([48.85, 2.35], 9);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '© OpenStreetMap' }).addTo(histMap);
     histLayer = L.layerGroup().addTo(histMap);
+    // Dès que l'utilisateur manipule la carte, on cesse de recentrer/redessiner
+    // automatiquement lors des rafraîchissements discrets.
+    histMap.on('dragstart zoomstart', () => { userInteracted = true; });
     invalidateWhenVisible();
     return histMap;
   }
@@ -268,6 +279,7 @@
 
     el.querySelectorAll('.hist-trip').forEach(node => {
       node.addEventListener('click', () => {
+        userInteracted = true;
         selectCard(node);
         showTripOnMap(histTrips[Number(node.dataset.i)]);
       });
@@ -275,6 +287,7 @@
 
     el.querySelectorAll('.hist-day').forEach(node => {
       node.addEventListener('click', () => {
+        userInteracted = true;
         selectCard(node);
         showDayOnMap(groups[Number(node.dataset.g)].trips);
       });
@@ -292,10 +305,21 @@
 
   // ----------------------------- CHARGEMENT -----------------------------
 
-  async function loadHistory(refresh) {
+  // refresh : force le re-fetch complet côté serveur (bouton « Rafraîchir »).
+  // isPoll  : rafraîchissement discret automatique (complétion en arrière-plan) —
+  //           on ne réinitialise alors ni le compteur d'essais ni l'interaction.
+  async function loadHistory(refresh, isPoll = false) {
     const id = histVehicleId || new URLSearchParams(window.location.search).get('id');
     if (!id) return;
     histVehicleId = id;
+
+    // Nouvelle demande explicite (Charger / Rafraîchir) : on repart à zéro.
+    if (!isPoll) {
+      clearTimeout(pollTimer);
+      pollTimer = null;
+      pollsLeft = MAX_POLLS;
+      userInteracted = false;
+    }
 
     const from = document.getElementById('histFrom')?.value;
     const to = document.getElementById('histTo')?.value;
@@ -305,25 +329,39 @@
     if (to) params.set('to', `${to}T23:59:59`);
     if (refresh) params.set('refresh', '1');
 
-    setStatus(refresh
-      ? 'Récupération chez les fournisseurs… (peut prendre quelques secondes)'
-      : 'Chargement…');
+    if (!isPoll) {
+      setStatus(refresh
+        ? 'Récupération chez les fournisseurs… (peut prendre quelques secondes)'
+        : 'Chargement…');
+    }
 
     try {
       const data = await apiFetch(`/vehicles/${id}/trips?${params.toString()}`);
       histTrips = data.trips || [];
-      setStatus(statusSummary());
       renderList();
       ensureMap();
-      // Par défaut : la journée la plus récente complète sur la carte.
-      if (histTrips.length) {
+      // Par défaut : la journée la plus récente complète sur la carte — tant que
+      // l'utilisateur n'a pas pris la main (clic/manipulation de la carte).
+      if (histTrips.length && !userInteracted) {
         const groups = groupByDay(histTrips);
         const firstDay = document.querySelector('.hist-day');
         if (firstDay) selectCard(firstDay);
         showDayOnMap(groups[0].trips);
       }
+
+      // Complétion des trajets passés encore en cours côté serveur : on
+      // re-demande discrètement la liste jusqu'à ce qu'elle soit complète.
+      if (data.pending && pollsLeft > 0) {
+        pollsLeft -= 1;
+        const base = histTrips.length ? `${statusSummary()} ` : '';
+        setStatus(`${base}⏳ Récupération des trajets passés en cours…`);
+        clearTimeout(pollTimer);
+        pollTimer = setTimeout(() => loadHistory(false, true), POLL_DELAY_MS);
+      } else {
+        setStatus(statusSummary());
+      }
     } catch (e) {
-      setStatus(`Erreur : ${e.message}`);
+      if (!isPoll) setStatus(`Erreur : ${e.message}`);
     }
   }
 

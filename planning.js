@@ -28,6 +28,10 @@ let state = {
   currentTourId: null,
   regieSepare:  false, // régie en mode départ/arrivée par tour (vs groupée)
   drag: { tourId: null, fromChauffeurId: null, fromDate: null, fromIdx: null },
+  // Sélection multiple (lasso au clic gauche maintenu) + presse-papier interne
+  selection:    new Set(), // clés "chauffeurId|dateISO|tourId"
+  clipboard:    [],        // [{ chauffeurId, dateISO, tourId, tour }]
+  clipboardCut: false,     // true = coller déplace (couper), false = coller duplique
 };
 
 // ─── Utilitaires date ─────────────────────────────────────────────────────────
@@ -902,21 +906,45 @@ function renderTourCard(tour, chauffeurId, dateISO, idx, total) {
   card.className = `tour-card ${tour.statut}`;
   card.dataset.tourId = tour._id;
   card.dataset.idx    = String(idx);
+  card.dataset.key    = tourKey(chauffeurId, dateISO, tour._id);
+  if (state.selection.has(card.dataset.key)) card.classList.add('is-selected');
 
   // ── Drag : gère à la fois le réordonnement intra-cellule et le déplacement inter-cellule
   card.draggable = true;
   card.addEventListener('dragstart', e => {
-    state.drag = { tourId: tour._id, fromChauffeurId: chauffeurId, fromDate: dateISO, fromIdx: idx };
+    // Carte sélectionnée + plusieurs tournées dans la sélection : le drag
+    // emporte TOUTE la sélection (déposée d'un bloc sur une cellule).
+    const isMulti = state.selection.size > 1 && state.selection.has(card.dataset.key);
+    state.drag = { tourId: tour._id, fromChauffeurId: chauffeurId, fromDate: dateISO, fromIdx: idx, multi: isMulti };
     e.dataTransfer.effectAllowed = 'move';
+
+    if (isMulti) {
+      // Fantôme personnalisé : pilule "N tournées" au lieu de la seule carte.
+      const ghost = document.createElement('div');
+      ghost.className = 'drag-ghost-count';
+      ghost.textContent = `${state.selection.size} tournées`;
+      document.body.appendChild(ghost);
+      e.dataTransfer.setDragImage(ghost, 24, 20);
+      setTimeout(() => ghost.remove(), 0); // le navigateur a déjà capturé l'image
+      // Toutes les cartes de la sélection s'estompent pendant le drag.
+      requestAnimationFrame(() => {
+        document.querySelectorAll('.tour-card.is-selected').forEach(c => c.classList.add('drag-multi'));
+      });
+      return;
+    }
     // Petit délai pour que le fantôme s'affiche avant d'appliquer la classe
     requestAnimationFrame(() => card.classList.add('dragging'));
   });
-  card.addEventListener('dragend', () => card.classList.remove('dragging'));
+  card.addEventListener('dragend', () => {
+    card.classList.remove('dragging');
+    document.querySelectorAll('.tour-card.drag-multi').forEach(c => c.classList.remove('drag-multi'));
+  });
 
   // ── Drag over sur une autre CARTE dans la même cellule -> réordonnement visuel
   card.addEventListener('dragover', e => {
     const dragging = state.drag;
     if (!dragging.tourId) return;
+    if (dragging.multi) return; // drag de sélection : géré par la cellule, pas de réordonnancement
     // Même cellule ?
     if (dragging.fromChauffeurId !== chauffeurId || dragging.fromDate !== dateISO) return;
     e.preventDefault();
@@ -928,6 +956,7 @@ function renderTourCard(tour, chauffeurId, dateISO, idx, total) {
     card.classList.remove('drag-over-card');
     const dragging = state.drag;
     if (!dragging.tourId) return;
+    if (dragging.multi) return; // drag de sélection : la cellule s'en charge
     if (dragging.fromChauffeurId !== chauffeurId || dragging.fromDate !== dateISO) return;
     e.preventDefault();
     e.stopPropagation();
@@ -1070,6 +1099,13 @@ function renderGrid() {
 
         e.preventDefault();
 
+        // ── Drag d'une sélection multiple : on déplace tout le bloc ici ──
+        if (state.drag.multi) {
+          state.drag = { tourId:null, fromChauffeurId:null, fromDate:null, fromIdx:null };
+          await moveSelectionTo(chId, dateISO); // filtre les tours déjà dans la cellule
+          return;
+        }
+
         // ── Déplacement inter-cellule normal ──
         const { tourId, fromChauffeurId, fromDate } = state.drag;
         if (!tourId) return;
@@ -1116,8 +1152,27 @@ function renderGrid() {
       addBtn.textContent = '+ Ajouter';
       addBtn.addEventListener('click', () => openModal('create', chId, dateISO, null));
 
+      // Bouton "Envoyer par WhatsApp" — visible si ≥1 tournée (module planning-whatsapp.js)
+      let waBtn = null;
+      if (tours.length > 0 && typeof window.openWaSend === 'function') {
+        waBtn = document.createElement('button');
+        waBtn.className = 'wa-send-btn';
+        waBtn.title = 'Envoyer le planning du jour au chauffeur par WhatsApp';
+        waBtn.innerHTML = `
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 0 1-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 0 1-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 0 1 2.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0 0 12.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 0 0 5.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 0 0-3.48-8.413"/>
+          </svg>
+          <span>Envoyer</span>
+        `;
+        waBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          window.openWaSend(chId, dateISO);
+        });
+      }
+
       cell.appendChild(list);
       if (assignBtn) cell.appendChild(assignBtn);
+      if (waBtn) cell.appendChild(waBtn);
       cell.appendChild(addBtn);
       if (!rowVisible) cell.style.display = 'none';
       grid.appendChild(cell);
@@ -1125,6 +1180,7 @@ function renderGrid() {
   });
 
   updateFilterUI(visibleToursCount);
+  updateSelectionBar(); // les cartes recréées portent déjà .is-selected (renderTourCard)
 }
 
 // ─── Label semaine ────────────────────────────────────────────────────────────
@@ -1569,6 +1625,407 @@ function resetFilters() {
   renderGrid();
 }
 
+// ─── Sélection multiple (lasso) & menu contextuel ────────────────────────────
+// Clic gauche maintenu depuis une zone vide de la grille : rectangle de
+// sélection qui attrape toutes les cartes tournées qu'il touche. Clic droit
+// sur une carte / la sélection : copier, couper, changer statut, supprimer.
+// Clic droit sur une cellule : coller / déplacer la sélection ici.
+
+const STATUT_LABELS = {
+  planifie: 'Planifié', annule: 'Annulé', chute: 'Chute',
+  debord: 'Débord', passage_vide: 'Passage à vide', effectue: 'Effectué',
+};
+
+function tourKey(chauffeurId, dateISO, tourId) {
+  return `${chauffeurId}|${dateISO}|${tourId}`;
+}
+function parseTourKey(key) {
+  const [chauffeurId, dateISO, tourId] = key.split('|');
+  return { chauffeurId, dateISO, tourId };
+}
+
+// Résout les clés sélectionnées vers les tours du state local (les clés de
+// tours disparus — filtrés, supprimés entre-temps — sont ignorées).
+function getSelectedTours() {
+  const out = [];
+  state.selection.forEach(key => {
+    const { chauffeurId, dateISO, tourId } = parseTourKey(key);
+    const p = getPlanningForCell(chauffeurId, dateISO);
+    const tour = p?.tours.find(t => String(t._id) === tourId);
+    if (tour) out.push({ chauffeurId, dateISO, tour });
+  });
+  return out;
+}
+
+function refreshSelectionClasses() {
+  document.querySelectorAll('.tour-card').forEach(c =>
+    c.classList.toggle('is-selected', state.selection.has(c.dataset.key))
+  );
+  updateSelectionBar();
+}
+
+function clearSelection() {
+  if (!state.selection.size) return;
+  state.selection.clear();
+  refreshSelectionClasses();
+}
+
+// Pilule flottante "N tournées sélectionnées" avec bouton de désélection.
+function updateSelectionBar() {
+  let bar = document.getElementById('selectionBar');
+  const n = state.selection.size;
+  if (!n) { bar?.remove(); return; }
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'selectionBar';
+    bar.className = 'selection-bar';
+    bar.innerHTML = `
+      <span class="sb-count"></span>
+      <span class="sb-hint">clic droit pour agir</span>
+      <button type="button" class="sb-clear" aria-label="Tout désélectionner">&times;</button>
+    `;
+    bar.querySelector('.sb-clear').addEventListener('click', clearSelection);
+    document.body.appendChild(bar);
+  }
+  bar.querySelector('.sb-count').textContent =
+    `${n} tournée${n > 1 ? 's' : ''} sélectionnée${n > 1 ? 's' : ''}`;
+}
+
+// ── Lasso (rectangle au clic gauche maintenu) ──────────────────────────────
+let _lasso = null; // { startX, startY, box, moved }
+
+function _lassoMove(e) {
+  if (!_lasso) return;
+  const dx = e.clientX - _lasso.startX;
+  const dy = e.clientY - _lasso.startY;
+  if (!_lasso.moved && Math.hypot(dx, dy) < 5) return; // seuil anti simple-clic
+  if (!_lasso.box) {
+    _lasso.moved = true;
+    const box = document.createElement('div');
+    box.className = 'lasso-box';
+    document.body.appendChild(box);
+    _lasso.box = box;
+  }
+  const left = Math.min(e.clientX, _lasso.startX);
+  const top  = Math.min(e.clientY, _lasso.startY);
+  const w = Math.abs(dx), h = Math.abs(dy);
+  Object.assign(_lasso.box.style, { left: `${left}px`, top: `${top}px`, width: `${w}px`, height: `${h}px` });
+
+  // Sélection en direct : toute carte qui intersecte le rectangle.
+  const next = new Set();
+  document.querySelectorAll('.tour-card').forEach(c => {
+    const r = c.getBoundingClientRect();
+    if (r.left < left + w && r.right > left && r.top < top + h && r.bottom > top) {
+      next.add(c.dataset.key);
+    }
+  });
+  state.selection = next;
+  refreshSelectionClasses();
+}
+
+function _lassoUp() {
+  document.removeEventListener('mousemove', _lassoMove);
+  const moved = _lasso?.moved;
+  _lasso?.box?.remove();
+  _lasso = null;
+  document.body.classList.remove('lasso-active');
+  if (!moved) clearSelection(); // simple clic dans le vide = tout désélectionner
+}
+
+function initLassoSelection() {
+  const grid = document.getElementById('planningGrid');
+  grid.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    // Le lasso ne démarre que depuis une zone vide : pas depuis une carte
+    // (réservée au drag natif de déplacement) ni un bouton/champ.
+    if (e.target.closest('.tour-card, button, input, select, textarea, a')) return;
+    e.preventDefault(); // évite la sélection de texte pendant le glisser
+    _lasso = { startX: e.clientX, startY: e.clientY, box: null, moved: false };
+    document.body.classList.add('lasso-active');
+    document.addEventListener('mousemove', _lassoMove);
+    document.addEventListener('mouseup', _lassoUp, { once: true });
+  });
+}
+
+// ── Menu contextuel ─────────────────────────────────────────────────────────
+let _ctxMenu = null;
+
+function closeContextMenu() {
+  if (!_ctxMenu) return;
+  _ctxMenu.remove();
+  _ctxMenu = null;
+  document.removeEventListener('mousedown', _ctxOutside, true);
+  document.removeEventListener('keydown', _ctxEsc, true);
+  window.removeEventListener('wheel', closeContextMenu, true);
+}
+function _ctxOutside(e) {
+  if (_ctxMenu && !_ctxMenu.contains(e.target)) closeContextMenu();
+}
+function _ctxEsc(e) {
+  if (e.key === 'Escape') closeContextMenu();
+}
+
+// items : tableau de { label, action, danger?, disabled?, dot?, children? } ou 'sep'.
+function buildMenuItem(it) {
+  const el = document.createElement('div');
+  el.className = 'ctx-item'
+    + (it.danger ? ' is-danger' : '')
+    + (it.disabled ? ' is-disabled' : '')
+    + (it.children ? ' has-sub' : '');
+  if (it.dot) {
+    const dot = document.createElement('span');
+    dot.className = 'ctx-dot';
+    dot.style.background = it.dot;
+    el.appendChild(dot);
+  }
+  const lbl = document.createElement('span');
+  lbl.className = 'ctx-label';
+  lbl.textContent = it.label;
+  el.appendChild(lbl);
+
+  if (it.children) {
+    el.insertAdjacentHTML('beforeend', '<span class="ctx-caret">▸</span>');
+    const sub = document.createElement('div');
+    sub.className = 'ctx-submenu';
+    it.children.forEach(child => sub.appendChild(buildMenuItem(child)));
+    el.appendChild(sub);
+  } else if (!it.disabled && it.action) {
+    el.addEventListener('click', e => {
+      e.stopPropagation();
+      closeContextMenu();
+      it.action();
+    });
+  }
+  return el;
+}
+
+function openContextMenu(x, y, items) {
+  closeContextMenu();
+  const menu = document.createElement('div');
+  menu.className = 'ctx-menu';
+  items.forEach(it => {
+    if (it === 'sep') {
+      const s = document.createElement('div');
+      s.className = 'ctx-sep';
+      menu.appendChild(s);
+      return;
+    }
+    menu.appendChild(buildMenuItem(it));
+  });
+  document.body.appendChild(menu);
+
+  // Clamp dans la fenêtre
+  const r = menu.getBoundingClientRect();
+  let left = x, top = y;
+  if (left + r.width  > window.innerWidth  - 8) left = window.innerWidth  - r.width  - 8;
+  if (top  + r.height > window.innerHeight - 8) top  = window.innerHeight - r.height - 8;
+  menu.style.left = `${Math.max(8, left)}px`;
+  menu.style.top  = `${Math.max(8, top)}px`;
+
+  _ctxMenu = menu;
+  setTimeout(() => {
+    document.addEventListener('mousedown', _ctxOutside, true);
+    document.addEventListener('keydown', _ctxEsc, true);
+    window.addEventListener('wheel', closeContextMenu, true);
+  }, 0);
+}
+
+function statutDotColor(value) {
+  return getComputedStyle(document.documentElement).getPropertyValue(`--${value}-txt`).trim() || '#6b7280';
+}
+
+function buildSelectionMenuItems() {
+  const n = state.selection.size;
+  return [
+    { label: `Copier (${n})`, action: () => copySelection(false) },
+    { label: `Couper — à coller ailleurs (${n})`, action: () => copySelection(true) },
+    {
+      label: 'Changer le statut',
+      children: Object.entries(STATUT_LABELS).map(([value, label]) => ({
+        label, dot: statutDotColor(value), action: () => bulkSetStatus(value)
+      }))
+    },
+    'sep',
+    { label: `Supprimer (${n})`, danger: true, action: () => bulkDelete() },
+  ];
+}
+
+function buildCellMenuItems(cell) {
+  const chId    = cell.dataset.chauffeurId;
+  const dateISO = cell.dataset.date;
+  const n = state.selection.size;
+  const m = state.clipboard.length;
+  const items = [];
+  if (n) {
+    items.push({ label: `Déplacer la sélection ici (${n})`, action: () => moveSelectionTo(chId, dateISO) });
+    items.push({ label: `Copier la sélection ici (${n})`,   action: () => copySelectionTo(chId, dateISO) });
+    items.push('sep');
+  }
+  items.push({
+    label: m ? `Coller ici (${m})${state.clipboardCut ? ' — déplacement' : ''}` : 'Coller ici',
+    disabled: !m,
+    action: () => pasteClipboard(chId, dateISO)
+  });
+  items.push('sep');
+  items.push({ label: '+ Nouveau tour', action: () => openModal('create', chId, dateISO, null) });
+  return items;
+}
+
+function initContextMenu() {
+  const grid = document.getElementById('planningGrid');
+  grid.addEventListener('contextmenu', e => {
+    const card = e.target.closest('.tour-card');
+    const cell = e.target.closest('.day-cell');
+    if (!card && !cell) return;
+    e.preventDefault();
+
+    if (card) {
+      // Clic droit sur une carte hors sélection : elle devient la sélection.
+      if (!state.selection.has(card.dataset.key)) {
+        state.selection = new Set([card.dataset.key]);
+        refreshSelectionClasses();
+      }
+      openContextMenu(e.clientX, e.clientY, buildSelectionMenuItems());
+    } else {
+      openContextMenu(e.clientX, e.clientY, buildCellMenuItems(cell));
+    }
+  });
+}
+
+// ── Actions groupées ────────────────────────────────────────────────────────
+// Les appels API sont SÉQUENTIELS : plusieurs écritures parallèles sur le même
+// document Planning (findOne + save côté backend) se marcheraient dessus.
+
+function stripTourInstanceFields(tour) {
+  const { _id, createdBy, updatedBy, createdAt, updatedAt, __v, ...data } = tour;
+  return data;
+}
+
+// Crée les tours d'une liste d'items {chauffeurId, dateISO, tour} dans la
+// cellule cible. Changement de chauffeur = même règle d'immat que moveTour.
+async function createToursAt(items, toChauffeurId, toDateISO) {
+  for (const it of items) {
+    const data = stripTourInstanceFields(it.tour);
+    if (String(toChauffeurId) !== String(it.chauffeurId)) {
+      const immat = detectImmatForChauffeur(toChauffeurId, toDateISO);
+      if (immat) data.immatCamion = immat;
+    }
+    await createTour(toChauffeurId, toDateISO, data);
+  }
+}
+
+function copySelection(cut) {
+  const items = getSelectedTours();
+  if (!items.length) return;
+  state.clipboard = items.map(it => ({
+    chauffeurId: it.chauffeurId,
+    dateISO:     it.dateISO,
+    tourId:      String(it.tour._id),
+    tour:        JSON.parse(JSON.stringify(it.tour)),
+  }));
+  state.clipboardCut = !!cut;
+  notify(
+    `${items.length} tournée(s) ${cut ? 'coupée(s)' : 'copiée(s)'} — clic droit sur une cellule → « Coller ici ».`,
+    'info'
+  );
+}
+
+async function pasteClipboard(toChauffeurId, toDateISO) {
+  const items = state.clipboard;
+  if (!items.length) return;
+  const wasCut = state.clipboardCut;
+  try {
+    if (wasCut) {
+      // Suppression des originaux d'abord (même logique delete+create que moveTour).
+      for (const it of items) {
+        await deleteTour(it.chauffeurId, it.dateISO, it.tourId).catch(() => {});
+      }
+    }
+    await createToursAt(items, toChauffeurId, toDateISO);
+    notify(`${items.length} tournée(s) ${wasCut ? 'déplacée(s)' : 'collée(s)'}.`, 'success');
+  } catch (e) {
+    notify('Erreur collage : ' + e.message, 'error');
+  }
+  if (wasCut) { state.clipboard = []; state.clipboardCut = false; } // un couper ne se colle qu'une fois
+  clearSelection();
+  await loadView(true);
+}
+
+async function moveSelectionTo(toChauffeurId, toDateISO) {
+  const items = getSelectedTours().filter(it =>
+    !(String(it.chauffeurId) === String(toChauffeurId) && it.dateISO === toDateISO)
+  );
+  if (!items.length) { clearSelection(); return; }
+  try {
+    for (const it of items) {
+      await deleteTour(it.chauffeurId, it.dateISO, it.tour._id);
+    }
+    await createToursAt(items, toChauffeurId, toDateISO);
+    notify(`${items.length} tournée(s) déplacée(s).`, 'success');
+  } catch (e) {
+    notify('Erreur déplacement : ' + e.message, 'error');
+  }
+  clearSelection();
+  await loadView(true);
+}
+
+async function copySelectionTo(toChauffeurId, toDateISO) {
+  const items = getSelectedTours();
+  if (!items.length) return;
+  try {
+    await createToursAt(items, toChauffeurId, toDateISO);
+    notify(`${items.length} tournée(s) copiée(s).`, 'success');
+  } catch (e) {
+    notify('Erreur copie : ' + e.message, 'error');
+  }
+  clearSelection();
+  await loadView(true);
+}
+
+async function bulkSetStatus(statut) {
+  const items = getSelectedTours();
+  if (!items.length) return;
+  try {
+    for (const it of items) {
+      await updateTour(it.chauffeurId, it.dateISO, it.tour._id, { statut });
+    }
+    notify(`${items.length} tournée(s) → ${STATUT_LABELS[statut]}.`, 'success');
+  } catch (e) {
+    notify('Erreur changement de statut : ' + e.message, 'error');
+  }
+  clearSelection();
+  await loadView(true);
+}
+
+async function bulkDelete() {
+  const items = getSelectedTours();
+  if (!items.length) return;
+  const ok = await confirmDialog(
+    `Supprimer ${items.length} tournée${items.length > 1 ? 's' : ''} ? Cette action est irréversible.`,
+    { title: 'Supprimer la sélection', okLabel: 'Supprimer', danger: true }
+  );
+  if (!ok) return;
+  try {
+    for (const it of items) {
+      await deleteTour(it.chauffeurId, it.dateISO, it.tour._id);
+    }
+    notify(`${items.length} tournée(s) supprimée(s).`, 'success');
+  } catch (e) {
+    notify('Erreur suppression : ' + e.message, 'error');
+  }
+  clearSelection();
+  await loadView(true);
+}
+
+function initSelectionAndContextMenu() {
+  initLassoSelection();
+  initContextMenu();
+  // Échap : ferme le menu (géré par _ctxEsc) et vide la sélection.
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') clearSelection();
+  });
+}
+
 // ─── Init ─────────────────────────────────────────────────────────────────────
 async function init() {
   showLoader();
@@ -1679,6 +2136,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.addEventListener('dragstart', startDragAutoScroll, true);
   document.addEventListener('dragend',   stopDragAutoScroll,  true);
   document.addEventListener('drop',      stopDragAutoScroll,  true);
+
+  // Sélection multiple au lasso + menu contextuel (clic droit)
+  initSelectionAndContextMenu();
 
   init();
 });

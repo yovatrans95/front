@@ -1588,3 +1588,180 @@ body.edit-mode .day-cell:hover .empty-cell-hint { display: block; }
 .confirm-actions .btn {
   min-width: 100px;
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   SÉLECTION MULTIPLE (lasso) & MENU CONTEXTUEL
+══════════════════════════════════════════════════════════════════════════ */
+body.lasso-active { user-select: none; cursor: crosshair; }
+
+.tour-card.is-selected {
+  position: relative;
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.16), 0 6px 16px rgba(37, 99, 235, 0.22);
+  transform: translateY(-1px);
+  transition: transform .12s ease, box-shadow .12s ease;
+}
+/* Voile bleuté par-dessus la carte, sans masquer son contenu */
+.tour-card.is-selected::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: rgba(37, 99, 235, 0.09);
+  border-radius: inherit;
+  pointer-events: none;
+}
+/* Coche bleue en haut à droite */
+.tour-card.is-selected::after {
+  content: '✓';
+  position: absolute;
+  top: -7px;
+  right: -7px;
+  width: 19px;
+  height: 19px;
+  background: #2563eb;
+  color: #fff;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 15px;
+  text-align: center;
+  box-shadow: 0 2px 6px rgba(37, 99, 235, 0.4);
+  z-index: 2;
+}
+
+/* Pendant le drag d'une sélection : les cartes emportées s'estompent */
+.tour-card.drag-multi {
+  opacity: 0.4;
+  filter: grayscale(0.3);
+}
+
+/* Fantôme de drag "N tournées" (capturé par setDragImage puis retiré) */
+.drag-ghost-count {
+  position: absolute;
+  top: -150px;
+  left: 0;
+  z-index: 5000;
+  padding: 9px 18px;
+  background: #2563eb;
+  color: #fff;
+  border-radius: 999px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 8px 24px rgba(37, 99, 235, 0.45);
+  white-space: nowrap;
+}
+
+.lasso-box {
+  position: fixed;
+  z-index: 3000;
+  border: 1.5px solid rgba(37, 99, 235, 0.75);
+  background: rgba(37, 99, 235, 0.08);
+  border-radius: 4px;
+  pointer-events: none;
+}
+
+/* Pilule flottante "N tournées sélectionnées" */
+.selection-bar {
+  position: fixed;
+  bottom: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2500;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px 9px 16px;
+  background: #1e3a8a;
+  color: #fff;
+  border-radius: 999px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 10px 30px rgba(30, 58, 138, 0.35);
+}
+.selection-bar .sb-hint {
+  font-weight: 400;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.6);
+}
+.selection-bar .sb-clear {
+  background: rgba(255, 255, 255, 0.15);
+  border: none;
+  color: #fff;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .15s;
+}
+.selection-bar .sb-clear:hover { background: rgba(255, 255, 255, 0.3); }
+
+/* Menu contextuel */
+.ctx-menu {
+  position: fixed;
+  z-index: 4000;
+  min-width: 220px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 14px 44px rgba(15, 23, 42, 0.16), 0 2px 8px rgba(15, 23, 42, 0.07);
+  padding: 6px;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.ctx-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.ctx-item:hover { background: #eef1fb; }
+.ctx-item.is-danger { color: #dc2626; }
+.ctx-item.is-danger:hover { background: rgba(220, 38, 38, 0.08); }
+.ctx-item.is-disabled { opacity: 0.4; cursor: default; }
+.ctx-item.is-disabled:hover { background: none; }
+
+.ctx-label { flex: 1; }
+.ctx-caret { margin-left: 12px; font-size: 11px; color: var(--text-subtle); }
+.ctx-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.ctx-sep {
+  height: 1px;
+  background: var(--border-light);
+  margin: 5px 8px;
+}
+
+/* Sous-menu (statuts) : affiché au survol du parent */
+.ctx-submenu {
+  display: none;
+  position: absolute;
+  left: calc(100% - 4px);
+  top: -7px;
+  min-width: 180px;
+  background: #ffffff;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 14px 44px rgba(15, 23, 42, 0.16), 0 2px 8px rgba(15, 23, 42, 0.07);
+  padding: 6px;
+}
+.ctx-item.has-sub:hover > .ctx-submenu { display: block; }

@@ -1,0 +1,109 @@
+/* ── Envoi planning par WhatsApp ─────────────────────────────────────────── */
+
+/* Bouton "Envoyer" dans chaque carré chauffeur/jour (même gabarit que
+   .assign-truck-btn, toujours visible dès qu'il y a des tournées). */
+.wa-send-btn {
+  display: inline-flex;
+  width: 100%;
+  margin-top: 4px;
+  padding: 4px 6px;
+  border: 1.5px dashed var(--border);
+  border-radius: 6px;
+  background: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-family: 'DM Sans', sans-serif;
+  cursor: pointer;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  transition: border-color .15s, color .15s, background .15s;
+}
+.wa-send-btn svg { width: 14px; height: 14px; flex-shrink: 0; }
+.wa-send-btn:hover {
+  border-color: #25d366;
+  color: #128c7e;
+  background: rgba(37, 211, 102, 0.06);
+}
+
+.wa-modal { max-width: 440px; width: 92%; }
+.wa-modal .modal-body { max-height: 65vh; overflow-y: auto; }
+
+.wa-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.wa-conn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  padding-bottom: 8px;
+}
+.wa-conn-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #9ca3af;
+  flex: none;
+}
+.wa-conn-dot.ok   { background: #22c55e; }
+.wa-conn-dot.warn { background: #f59e0b; }
+.wa-conn-dot.err  { background: #ef4444; }
+.wa-connect-btn { padding: 4px 10px; font-size: 12px; }
+
+.wa-qr-zone {
+  text-align: center;
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 12px;
+}
+.wa-qr-zone img { width: 220px; height: 220px; }
+.wa-qr-zone p { font-size: 12px; color: var(--text-muted); margin-top: 8px; line-height: 1.5; }
+
+.wa-pdf-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  margin: 4px 0 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.wa-pdf-option input { accent-color: #25d366; }
+
+.wa-subtitle { font-size: 13px; font-weight: 600; margin: 14px 0 6px; }
+.wa-subtitle-warn { color: #b45309; }
+
+.wa-preview-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  font-size: 13px;
+}
+.wa-preview-item summary { cursor: pointer; }
+.wa-message {
+  background: #ecfdf5;
+  border-radius: var(--radius);
+  padding: 10px;
+  margin-top: 8px;
+  font-size: 12px;
+  white-space: pre-wrap;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.wa-ignore-list, .wa-result-list {
+  font-size: 12.5px;
+  padding-left: 18px;
+  line-height: 1.7;
+}
+.wa-ok { color: #15803d; }
+.wa-ko { color: #b91c1c; }
+.wa-muted { color: var(--text-muted); font-size: 13px; }
+.wa-error { color: #b91c1c; font-size: 13px; }

@@ -19,7 +19,7 @@
   //   - soit avec une URL accessible :  '/img/logo-yovatrans.png' (même origine)
   // Tant que c'est null, un placeholder neutre est dessiné à la place.
   const CONFIG = {
-    logoUrl:      "yov.png",
+    logoUrl:      "img/yov.png",
     logoSize:     28,    // taille du logo en mm (essaie 24 à 36 selon ton image)
     brandName:    'YOVATRANS',
     brandTagline: 'Transport & logistique',
@@ -235,6 +235,16 @@
       });
     });
     return arr;
+  }
+
+  // Heure de prise de poste déduite des tournées : la plus petite heureDebut
+  // renseignée parmi les tournées non annulées (même logique que la popup WhatsApp).
+  function getHeurePriseFromTours(tours) {
+    const heures = (tours || [])
+      .filter(t => t.statut !== 'annule' && t.heureDebut)
+      .map(t => t.heureDebut)
+      .sort();
+    return heures[0] || '';
   }
 
   // Camion "principal" de la journée = immat la plus représentée
@@ -812,25 +822,31 @@
     doc.text('LOGO', x + size / 2, y + size / 2 + 1.2, { align: 'center' });
   }
 
-  // ── Bloc info chauffeur / camion (sobre, sans fond coloré) ───────────────────
-  function drawInfoBlock(doc, chauffeur, dateISO, tours, margin, pageW) {
+  // ── Bloc info chauffeur / prise de poste / camion (sobre, sans fond coloré) ──
+  function drawInfoBlock(doc, chauffeur, dateISO, tours, margin, pageW, heurePrise) {
     // baseY = margin + logoSize + trait (+4) + un peu d'air (+6)
     const y0 = margin + (CONFIG.logoSize || 28) + 10;
     const w = pageW - margin * 2;
-    const colW = w / 2;
+    // Trois colonnes : chauffeur · prise de poste · camion(s)
+    const col1 = w * 0.42;
+    const col2 = w * 0.24;
+    const x2 = margin + col1;         // début colonne prise de poste
+    const x3 = margin + col1 + col2;  // début colonne camion
     const h = 16;
 
-    // Pas de fond, juste deux blocs de texte séparés par un trait vertical fin
+    // Pas de fond, juste des blocs de texte séparés par des traits verticaux fins
     doc.setDrawColor(230, 232, 236);
     doc.setLineWidth(0.3);
-    doc.line(margin + colW, y0 + 1, margin + colW, y0 + h - 1);
+    doc.line(x2, y0 + 1, x2, y0 + h - 1);
+    doc.line(x3, y0 + 1, x3, y0 + h - 1);
 
     // Labels (petits, en uppercase, gris)
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7);
     doc.setTextColor(140, 144, 152);
-    doc.text('CHAUFFEUR', margin,        y0 + 3);
-    doc.text('CAMION(S)', margin + colW + 4, y0 + 3);
+    doc.text('CHAUFFEUR',      margin, y0 + 3);
+    doc.text('PRISE DE POSTE', x2 + 4, y0 + 3);
+    doc.text('CAMION(S)',      x3 + 4, y0 + 3);
 
     // Valeur chauffeur
     doc.setFont('helvetica', 'bold');
@@ -849,30 +865,107 @@
     ].filter(Boolean).join('  ·  ');
     doc.text(sub, margin, y0 + 14);
 
+    // Valeur prise de poste (heure passée par la popup WhatsApp, sinon déduite
+    // de la première heureDebut des tournées)
+    const prise = heurePrise || getHeurePriseFromTours(tours);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(13);
+    doc.setTextColor(26, 29, 35);
+    doc.text(prise || '—', x2 + 4, y0 + 9);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(8);
+    doc.setTextColor(120, 124, 132);
+    doc.text('Heure d\'arrivée', x2 + 4, y0 + 14);
+
     // Valeur camion
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(13);
     doc.setTextColor(26, 29, 35);
     const camion = getCamionPrincipal(tours);
-    const camionLines = doc.splitTextToSize(camion, colW - 6);
-    doc.text(camionLines[0] || '—', margin + colW + 4, y0 + 9);
+    const camionLines = doc.splitTextToSize(camion, w - col1 - col2 - 8);
+    doc.text(camionLines[0] || '—', x3 + 4, y0 + 9);
     if (camionLines.length > 1) {
       doc.setFontSize(9);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(120, 124, 132);
-      doc.text(camionLines.slice(1).join(' '), margin + colW + 4, y0 + 14);
+      doc.text(camionLines.slice(1).join(' '), x3 + 4, y0 + 14);
     }
 
     return y0 + h;
   }
 
+  // ── Construction des lignes du tableau pour une tournée ──────────────────────
+  // `personName` = contenu de la 4e colonne (client en mode chauffeur,
+  // chauffeur en mode client). `startNum` = numéro de la première ligne
+  // produite (la numérotation continue sur tout le tableau).
+  //
+  // Une régie est ÉCLATÉE comme des tours : une ligne complète par tour.
+  //   - regieTours détaillés  -> une ligne par tour (chargement » déchargement)
+  //   - sinon nombreTours = N -> N lignes identiques (source » destination)
+  //   - sinon                 -> une seule ligne (comme un tour normal)
+  function buildTourRows(t, startNum, personName) {
+    const periode = (t.heurePeriode || 'journee').toUpperCase() === 'NUIT' ? 'NUIT' : 'JOUR';
+
+    // Cellule statut colorée
+    const statutKey   = t.statut || 'planifie';
+    const statutLabel = STATUT_LABELS_SHORT[statutKey] || statutKey;
+    const statutColor = STATUT_PDF_COLOR[statutKey]    || [26, 29, 35];
+    const statutCell  = {
+      content: statutLabel,
+      styles: { textColor: statutColor, fontStyle: 'bold' },
+    };
+
+    const s = cleanText(t.source) || '—';
+    const d = cleanText(t.destination) || '—';
+    const lieuMission = `${s}\n» ${d}`;
+
+    const camion = t.immatCamion || '—';
+    const ref    = t.refTransport || '';
+    const notes  = cleanText(t.notes);
+    const extras = [];
+    if (ref)   extras.push(`Réf: ${ref}`);
+    if (notes) extras.push(`Note: ${notes}`);
+    const extra = extras.join('\n');
+
+    const rows = [];
+    let n = startNum;
+
+    if (t.type === 'regie') {
+      const detail = Array.isArray(t.regieTours)
+        ? t.regieTours.filter(rt => rt.chargement || rt.dechargement)
+        : [];
+      const nb = Math.max(Number(t.nombreTours) || 0, detail.length, 1);
+
+      // Une ligne complète par tour de régie, numérotée comme les tours
+      for (let k = 0; k < nb; k++) {
+        const rt   = detail[k];
+        const lieu = rt
+          ? `${cleanText(rt.chargement) || '—'}\n» ${cleanText(rt.dechargement) || '—'}`
+          : lieuMission;
+        const typeCell = nb > 1 ? `RÉGIE T${k + 1}\n${periode}` : `RÉGIE\n${periode}`;
+        // Réf / notes uniquement sur la première ligne pour ne pas surcharger
+        rows.push([String(n++), typeCell, statutCell, personName, lieu, camion, k === 0 ? extra : '']);
+      }
+    } else {
+      rows.push([String(n++), `TOUR\n${periode}`, statutCell, personName, lieuMission, camion, extra]);
+    }
+
+    return rows;
+  }
+
   // ── Tableau des tournées (sobre, monochrome) ──────────────────────────────────
   function drawToursTable(doc, tours, yStart, margin, pageW, pageH) {
-    // Titre de section
+    // Une ligne par tour : les régies sont éclatées comme des tours normaux
+    const body = [];
+    tours.forEach((t) => {
+      body.push(...buildTourRows(t, body.length + 1, cleanText(t.client) || '—'));
+    });
+
+    // Titre de section (compte les lignes = les tours réels)
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(26, 29, 35);
-    doc.text(`TOURNÉES (${tours.length})`, margin, yStart + 4);
+    doc.text(`TOURNÉES (${body.length})`, margin, yStart + 4);
 
     doc.setDrawColor(26, 29, 35);
     doc.setLineWidth(0.4);
@@ -888,51 +981,6 @@
         margin, tableStartY + 8);
       return tableStartY + 12;
     }
-
-    // Préparation des données — avec colonne Statut dédiée
-    const body = tours.map((t, i) => {
-      const num    = String(i + 1);
-      const type   = t.type === 'regie' ? 'RÉGIE' : 'TOUR';
-      const periode = (t.heurePeriode || 'journee').toUpperCase() === 'NUIT' ? 'NUIT' : 'JOUR';
-      const typeCell = `${type}\n${periode}`;
-
-      // Cellule statut colorée
-      const statutKey   = t.statut || 'planifie';
-      const statutLabel = STATUT_LABELS_SHORT[statutKey] || statutKey;
-      const statutColor = STATUT_PDF_COLOR[statutKey]    || [26, 29, 35];
-      const statutCell  = {
-        content: statutLabel,
-        styles: { textColor: statutColor, fontStyle: 'bold' },
-      };
-
-      const client = cleanText(t.client) || '—';
-
-      let lieu;
-      const s = cleanText(t.source) || '—';
-      const d = cleanText(t.destination) || '—';
-      lieu = `${s}\n» ${d}`;
-      if (t.type === 'regie') {
-        const nb = Number(t.nombreTours) || 0;
-        if (nb) lieu += `\n${nb} tour${nb > 1 ? 's' : ''} effectué${nb > 1 ? 's' : ''}`;
-        if (Array.isArray(t.regieTours)) {
-          t.regieTours.forEach((rt, i) => {
-            const c = cleanText(rt.chargement) || '—';
-            const dd = cleanText(rt.dechargement) || '—';
-            if (rt.chargement || rt.dechargement) lieu += `\nT${i + 1}: ${c} » ${dd}`;
-          });
-        }
-      }
-
-      const camion = t.immatCamion || '—';
-      const ref    = t.refTransport || '';
-      const notes  = cleanText(t.notes);
-      const extras = [];
-      if (ref)   extras.push(`Réf: ${ref}`);
-      if (notes) extras.push(`Note: ${notes}`);
-      const extra = extras.join('\n');
-
-      return [num, typeCell, statutCell, client, lieu, camion, extra];
-    });
 
     doc.autoTable({
       startY: tableStartY,
@@ -958,7 +1006,7 @@
       alternateRowStyles: { fillColor: [250, 250, 251] },
       columnStyles: {
         0: { cellWidth: 8,  halign: 'center', fontStyle: 'bold' },
-        1: { cellWidth: 16, halign: 'center', fontStyle: 'bold', fontSize: 8 },
+        1: { cellWidth: 19, halign: 'center', fontStyle: 'bold', fontSize: 8 },
         2: { cellWidth: 18, halign: 'center', fontSize: 8.5 },
         3: { cellWidth: 32, fontStyle: 'bold' },
         4: { cellWidth: 'auto' },
@@ -1032,11 +1080,19 @@
 
   // ── Tableau des tournées en mode client (col Chauffeur à la place de l'ordre client) ──
   function drawToursTableForClient(doc, tours, yStart, margin, pageW, pageH) {
-    // Titre de section
+    // Une ligne par tour, colonne 4 = chauffeur ; régies éclatées comme des tours
+    const body = [];
+    tours.forEach((t) => {
+      const ch = t._chauffeur;
+      const chauffeurName = ch ? `${ch.prenom || ''} ${ch.nom || ''}`.trim() : '—';
+      body.push(...buildTourRows(t, body.length + 1, chauffeurName));
+    });
+
+    // Titre de section (compte les lignes = les tours réels)
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(26, 29, 35);
-    doc.text(`TOURNÉES (${tours.length})`, margin, yStart + 4);
+    doc.text(`TOURNÉES (${body.length})`, margin, yStart + 4);
 
     doc.setDrawColor(26, 29, 35);
     doc.setLineWidth(0.4);
@@ -1051,52 +1107,6 @@
       doc.text('Aucune tournée à afficher.', margin, tableStartY + 8);
       return tableStartY + 12;
     }
-
-    const body = tours.map((t, i) => {
-      const num     = String(i + 1);
-      const type    = t.type === 'regie' ? 'RÉGIE' : 'TOUR';
-      const periode = (t.heurePeriode || 'journee').toUpperCase() === 'NUIT' ? 'NUIT' : 'JOUR';
-      const typeCell = `${type}\n${periode}`;
-
-      // Cellule statut colorée
-      const statutKey   = t.statut || 'planifie';
-      const statutLabel = STATUT_LABELS_SHORT[statutKey] || statutKey;
-      const statutColor = STATUT_PDF_COLOR[statutKey]    || [26, 29, 35];
-      const statutCell  = {
-        content: statutLabel,
-        styles: { textColor: statutColor, fontStyle: 'bold' },
-      };
-
-      const ch = t._chauffeur;
-      const chauffeurName = ch ? `${ch.prenom || ''} ${ch.nom || ''}`.trim() : '—';
-
-      let lieu;
-      const s = cleanText(t.source) || '—';
-      const d = cleanText(t.destination) || '—';
-      lieu = `${s}\n» ${d}`;
-      if (t.type === 'regie') {
-        const nb = Number(t.nombreTours) || 0;
-        if (nb) lieu += `\n${nb} tour${nb > 1 ? 's' : ''} effectué${nb > 1 ? 's' : ''}`;
-        if (Array.isArray(t.regieTours)) {
-          t.regieTours.forEach((rt, i) => {
-            const c = cleanText(rt.chargement) || '—';
-            const dd = cleanText(rt.dechargement) || '—';
-            if (rt.chargement || rt.dechargement) lieu += `\nT${i + 1}: ${c} » ${dd}`;
-          });
-        }
-      }
-
-      const camion = t.immatCamion || '—';
-      const ref    = t.refTransport || '';
-      const notes  = cleanText(t.notes);
-
-      const extras = [];
-      if (ref)   extras.push(`Réf: ${ref}`);
-      if (notes) extras.push(`Note: ${notes}`);
-      const extra = extras.join('\n');
-
-      return [num, typeCell, statutCell, chauffeurName, lieu, camion, extra];
-    });
 
     doc.autoTable({
       startY: tableStartY,
@@ -1122,7 +1132,7 @@
       alternateRowStyles: { fillColor: [250, 250, 251] },
       columnStyles: {
         0: { cellWidth: 8,  halign: 'center', fontStyle: 'bold' },
-        1: { cellWidth: 16, halign: 'center', fontStyle: 'bold', fontSize: 8 },
+        1: { cellWidth: 19, halign: 'center', fontStyle: 'bold', fontSize: 8 },
         2: { cellWidth: 18, halign: 'center', fontSize: 8.5 },
         3: { cellWidth: 32, fontStyle: 'bold' },
         4: { cellWidth: 'auto' },
@@ -1175,6 +1185,45 @@
       document.querySelector('.header-tools')?.prepend(btn);
     }
   }
+
+  // ─── Feuille de tournée d'UN chauffeur en base64 (pour envoi WhatsApp) ───────
+  // Réutilise le même rendu que l'export PDF : en-tête, bloc infos, tableau.
+  // Renvoie { base64, filename } ou null si aucune tournée à cette date.
+  // `heurePrise` (optionnel, "HH:MM") : heure de prise de poste saisie dans la
+  // popup WhatsApp — affichée dans le bloc d'infos du PDF. Si absente, elle est
+  // déduite de la première heureDebut des tournées.
+  window.buildTourSheetPdfBase64 = async function (chauffeurId, dateISO, heurePrise) {
+    await ensurePdfLibsLoaded();
+    const { jsPDF } = window.jspdf;
+
+    const chauffeur = state.chauffeurs.find(c => String(c._id) === String(chauffeurId));
+    const planning = (typeof getPlanningForCell === 'function')
+      ? getPlanningForCell(chauffeurId, dateISO)
+      : state.plannings.find(p =>
+          String(p.chauffeurId?._id || p.chauffeurId) === String(chauffeurId) && p.date === dateISO
+        );
+    if (!chauffeur || !planning || !planning.tours) return null;
+
+    const tours = planning.tours.filter(t => t.statut !== 'annule');
+    if (!tours.length) return null;
+
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margin = 12;
+
+    const logoData = await loadImageAsDataURL(CONFIG.logoUrl);
+    drawHeader(doc, pageW, margin, dateISO, logoData, 'FEUILLE DE TOURNÉE');
+    const yAfterInfo = drawInfoBlock(doc, chauffeur, dateISO, tours, margin, pageW, heurePrise);
+    drawToursTable(doc, tours, yAfterInfo + 4, margin, pageW, pageH);
+    drawFooter(doc, pageW, pageH, margin, 1, 1);
+
+    const nomFichier = `tournee_${(chauffeur.nom || '').toLowerCase()}_${dateISO}.pdf`;
+    return {
+      base64: doc.output('datauristring').split(',')[1],
+      filename: nomFichier
+    };
+  };
 
   // ─── Init après DOMContentLoaded ─────────────────────────────────────────────
   if (document.readyState === 'loading') {

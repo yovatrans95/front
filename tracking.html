@@ -115,6 +115,81 @@
   .ctx-sep{height:1px;background:var(--border);margin:5px 8px}
   .loading{position:absolute;z-index:700;right:16px;top:16px;background:#fff;border:1px solid var(--border);box-shadow:var(--shadow);border-radius:12px;padding:10px 14px;font-size:.8rem;color:var(--text2);font-weight:700}
 
+  /* ── Widget Itinéraire (tuile du tableau de bord) ────────────────────── */
+  .route-widget-body{flex:1 1 auto;min-height:0;overflow-y:auto;padding:12px}
+  .rw-section{font-size:.62rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);font-weight:800;margin:12px 0 7px}
+  .rw-section:first-child{margin-top:0}
+  .rp-input{width:100%;border:1.5px solid var(--border);border-radius:11px;padding:10px 12px;font:600 .82rem 'Plus Jakarta Sans',sans-serif;color:var(--navy);outline:none}
+  .rp-input:focus{border-color:var(--blue-500)}
+  .rp-search-row{display:flex;gap:7px}
+  .rp-search-row .wp-field{flex:1}
+  .rp-filter{flex-shrink:0;border:1.5px solid var(--border);border-radius:11px;background:#fff;color:var(--navy);font:700 .74rem 'Plus Jakarta Sans',sans-serif;padding:0 8px;outline:none;cursor:pointer}
+  .wp-target{flex-shrink:0;width:32px;height:36px;display:flex;align-items:center;justify-content:center;border:1.5px solid var(--border);border-radius:10px;background:#fff;color:var(--blue-700);cursor:pointer;transition:.15s}
+  .wp-target:hover{border-color:var(--blue-500);background:var(--blue-50)}
+  .wp-target.arming{background:var(--grad-main);color:#fff;border-color:transparent}
+  .wp-target svg{width:15px;height:15px}
+  body.placing-point .leaflet-container{cursor:crosshair !important}
+  .wp-row{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+  .wp-badge{flex-shrink:0;width:24px;height:24px;border-radius:50%;color:#fff;font:800 .68rem 'Plus Jakarta Sans',sans-serif;display:flex;align-items:center;justify-content:center;border:2px solid #fff;box-shadow:0 2px 6px rgba(20,40,90,.3)}
+  .wp-badge.depart{background:#10b981}
+  .wp-badge.arrivee{background:#7c4fe0}
+  .wp-badge.etape{background:#1a2c6e}
+  .wp-field{position:relative;flex:1;min-width:0}
+  .wp-remove{flex-shrink:0;width:24px;height:24px;border:none;background:none;color:var(--muted);font-size:15px;cursor:pointer;border-radius:7px;line-height:1}
+  .wp-remove:hover{background:rgba(220,38,38,.08);color:#dc2626}
+  .wp-actions{display:flex;gap:7px;margin-top:3px;flex-wrap:wrap}
+  .wp-actions .mini-btn{border:1px solid var(--border);background:var(--blue-50);color:var(--blue-700);border-radius:9px;padding:6px 11px;font:800 .72rem 'Plus Jakarta Sans',sans-serif;cursor:pointer;transition:.15s}
+  .wp-actions .mini-btn:hover{background:var(--blue-100);border-color:var(--border2)}
+  .wp-actions .mini-btn.danger{background:rgba(220,38,38,.06);color:#dc2626;border-color:rgba(220,38,38,.15)}
+  .route-status{font-size:.73rem;color:var(--muted);font-weight:700;padding:6px 2px 0}
+  .route-card{border:1.5px solid var(--border);border-radius:13px;padding:10px 12px;margin-top:9px;cursor:pointer;transition:.15s;background:#fff}
+  .route-card:hover{border-color:var(--border2);box-shadow:var(--shadow)}
+  .route-card.selected{border-color:var(--blue-500);background:var(--blue-50);box-shadow:var(--shadow)}
+  .route-card-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px}
+  .route-time{font-weight:800;font-size:1rem;color:var(--navy)}
+  .route-dist{font-weight:800;font-size:.8rem;color:var(--blue-700)}
+  .route-sub{font-size:.68rem;color:var(--muted);font-weight:600;margin-top:2px}
+  .route-card-actions{display:flex;gap:6px;margin-top:8px}
+  .route-keep{border:none;border-radius:9px;padding:6px 11px;background:var(--grad-main);color:#fff;font:800 .7rem 'Plus Jakarta Sans',sans-serif;cursor:pointer;box-shadow:0 3px 10px rgba(79,114,245,.3)}
+  /* Trajets enregistrés (persistés, colorables, supprimables) */
+  .saved-route{display:flex;align-items:center;gap:9px;border:1px solid var(--border);border-radius:12px;padding:8px 10px;margin-top:8px;background:#fff;cursor:pointer;transition:.15s}
+  .saved-route:hover{border-color:var(--border2);box-shadow:var(--shadow)}
+  .saved-route.hidden-route{opacity:.5}
+  .sr-color{flex-shrink:0;width:24px;height:24px;border:none;padding:0;background:none;cursor:pointer;border-radius:7px;overflow:hidden}
+  .sr-color::-webkit-color-swatch-wrapper{padding:0}
+  .sr-color::-webkit-color-swatch{border:2px solid #fff;border-radius:7px;box-shadow:0 1px 4px rgba(20,40,90,.3)}
+  .sr-main{flex:1;min-width:0}
+  .sr-name{display:block;font-weight:800;font-size:.74rem;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sr-sub{display:block;font-size:.66rem;color:var(--muted);font-weight:700}
+  .sr-btn{flex-shrink:0;width:24px;height:24px;border:none;background:none;color:var(--muted);cursor:pointer;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;line-height:1}
+  .sr-btn:hover{background:var(--blue-50);color:var(--blue-700)}
+  .sr-btn.del:hover{background:rgba(220,38,38,.08);color:#dc2626}
+  .sr-btn svg{width:13px;height:13px}
+  .rw-empty{font-size:.72rem;color:var(--muted);font-weight:600;padding:4px 2px}
+  /* Autocomplétion (suggestions sous les champs) */
+  .ac-list{position:absolute;top:calc(100% + 4px);left:0;right:0;z-index:1500;background:#fff;border:1px solid var(--border);border-radius:13px;box-shadow:var(--shadow-lg);padding:5px;max-height:250px;overflow-y:auto}
+  .ac-item{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:9px;cursor:pointer}
+  .ac-item:hover,.ac-item.focused{background:var(--blue-50)}
+  .ac-icon{flex-shrink:0;width:24px;height:24px;border-radius:7px;background:var(--blue-100);color:var(--blue-700);display:flex;align-items:center;justify-content:center}
+  .ac-icon svg{width:13px;height:13px}
+  .ac-icon.poi{background:rgba(16,185,129,.12);color:#059669}
+  .ac-main{min-width:0;flex:1}
+  .ac-label{display:block;font-weight:700;font-size:.76rem;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .ac-sub{display:block;font-size:.65rem;color:var(--muted);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* Épingles itinéraire (en plus de start/end existantes) */
+  .site-pin.etape{background:#1a2c6e}
+  .site-pin.search{background:#f59e0b}
+  /* Popup lieu (Partir d'ici / Aller ici) */
+  .place-pop{padding:12px 14px}
+  .place-pop-title{font-weight:800;font-size:.85rem;color:var(--navy);line-height:1.3;margin-bottom:3px}
+  .place-pop-sub{font-size:.7rem;color:var(--muted);font-weight:600;margin-bottom:10px}
+  .place-pop-actions{display:flex;gap:7px}
+  .place-pop-btn{flex:1;border:none;border-radius:10px;padding:8px 6px;font:800 .7rem 'Plus Jakarta Sans',sans-serif;cursor:pointer}
+  .place-pop-btn.from{background:rgba(16,185,129,.12);color:#059669}
+  .place-pop-btn.from:hover{background:rgba(16,185,129,.22)}
+  .place-pop-btn.to{background:var(--blue-100);color:var(--blue-700)}
+  .place-pop-btn.to:hover{background:#cbd8ff}
+
   /* Contrôle stations-service sur la carte */
   .station-ctrl{position:absolute;z-index:700;left:52px;top:12px;display:flex;gap:6px;align-items:center}
   .station-toggle{border:1px solid var(--border);background:#fff;color:var(--blue-700);box-shadow:var(--shadow);border-radius:12px;padding:9px 13px;font:800 .8rem 'Plus Jakarta Sans',sans-serif;cursor:pointer;transition:.15s;white-space:nowrap}
@@ -443,6 +518,45 @@
       </div>
     </div>
 
+    <div class="grid-stack-item" gs-id="itineraire" gs-x="0" gs-y="9" gs-w="6" gs-h="6">
+      <div class="grid-stack-item-content panel">
+        <div class="panel-head volatile-head drag-handle">
+          <span class="widget-grip" aria-hidden="true"></span>
+          <span class="volatile-title">Itinéraire A → B</span>
+          <span class="badge blue" id="routeCount">0</span>
+        </div>
+        <div class="route-widget-body">
+
+          <div class="rw-section">Recherche avancée</div>
+          <div class="rp-search-row">
+            <div class="wp-field">
+              <input id="routePlaceSearch" class="rp-input" placeholder="Adresse, site, entreprise, chantier, ville..." autocomplete="off">
+            </div>
+            <select id="routeSearchFilter" class="rp-filter" title="Filtrer le type de résultat">
+              <option value="tout">Tout</option>
+              <option value="adresse">Adresses</option>
+              <option value="lieu">Lieux &amp; sites</option>
+            </select>
+          </div>
+
+          <div class="rw-section">Points du trajet</div>
+          <div id="wpList"></div>
+          <div class="wp-actions">
+            <button class="mini-btn" id="btnAddStep" type="button">+ Étape</button>
+            <button class="mini-btn" id="btnSwap" type="button">⇅ Inverser</button>
+            <button class="mini-btn danger" id="btnClearRoute" type="button">Effacer</button>
+          </div>
+          <div class="route-status" id="routeStatus"></div>
+
+          <div id="routeSummary"></div>
+
+          <div class="rw-section">Trajets enregistrés</div>
+          <div id="savedRoutes"></div>
+
+        </div>
+      </div>
+    </div>
+
     <div class="grid-stack-item" gs-id="map" gs-x="6" gs-y="0" gs-w="6" gs-h="9">
       <div class="grid-stack-item-content panel map-wrap">
         <span class="widget-grip map-grip drag-handle" title="Déplacer la carte" aria-hidden="true"></span>
@@ -471,5 +585,6 @@
 <script src="sidebar.js" data-page="tracking"></script>
 
 <script src="tracking.js"></script>
+<script src="itineraire.js"></script>
 </body>
 </html>

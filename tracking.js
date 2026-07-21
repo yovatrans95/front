@@ -205,7 +205,12 @@ function initContextMenu() {
     map.on('contextmenu', (e) => {
       e.originalEvent.preventDefault();
       const { lat, lng } = e.latlng;
+      // Items itinéraire (fournis par itineraire.js s'il est chargé) en tête de menu.
+      const routeItems = (typeof getItineraryContextItems === 'function')
+        ? [...getItineraryContextItems(lat, lng), null]
+        : [];
       showContextMenu(e.originalEvent.clientX, e.originalEvent.clientY, [
+        ...routeItems,
         { label: 'Poser un repère ici', onClick: () => {
           const pin = { id: 'p' + Date.now() + Math.random().toString(36).slice(2, 6), lat, lng, label: '' };
           pins.push(pin); renderPin(pin); savePins(); pinMarkers[pin.id].openPopup();
@@ -258,6 +263,14 @@ function vehicleContextMenu(ev, marker) {
     null,
     { label: 'Copier l\'immatriculation', onClick: () => copyText(v.immatriculation || '') }
   ];
+  // Itinéraire vers/depuis la position actuelle du camion (module itineraire.js)
+  if (window.itineraire && v.lat != null && v.lng != null) {
+    const label = `Camion ${v.immatriculation || ''}`.trim();
+    items.splice(2, 0,
+      { label: 'Itinéraire vers ce camion',  onClick: () => window.itineraire.setTo(v.lat, v.lng, label) },
+      { label: 'Itinéraire depuis ce camion', onClick: () => window.itineraire.setFrom(v.lat, v.lng, label) }
+    );
+  }
   if (v.vehicleId) {
     items.push({ label: 'Ouvrir la fiche véhicule', onClick: () => { window.location.href = `vehicule.html?id=${v.vehicleId}`; } });
   }
